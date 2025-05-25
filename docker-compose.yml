@@ -1,0 +1,194 @@
+version: '3.8'
+
+networks:
+  # Mạng chung cho tất cả các services để có thể giao tiếp với nhau
+  microservices_network:
+    driver: bridge
+
+services:
+  # -------------------- INFRASTRUCTURE --------------------
+
+  consul:
+    image: consul:1.18 # Nên dùng phiên bản cụ thể
+    container_name: consul_service_discovery
+    ports:
+      - "8500:8500" # Consul UI & HTTP API
+      - "8600:8600/udp" # Consul DNS
+    command: "agent -server -ui -client=0.0.0.0 -bootstrap-expect=1"
+    networks:
+      - microservices_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kong-gateway-infra: # Đổi tên để tránh trùng với service "api-gateway" của bạn
+    image: kong:3.7 # Nên dùng phiên bản cụ thể
+    container_name: kong_api_gateway_infra
+    user: root # Cần thiết cho một số plugin hoặc nếu bạn muốn ghi log vào thư mục mount
+    environment:
+      KONG_DATABASE: 'off'
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yaml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_DNS_RESOLVER: consul:8600 # Kong sử dụng DNS của Consul để phân giải upstreams
+      KONG_PLUGINS: bundled,grpc-gateway # grpc-gateway rất hữu ích cho việc expose gRPC qua REST
+      KONG_LOG_LEVEL: debug # Cho môi trường dev
+      KONG_TRUSTED_IPS: "0.0.0.0/0" # Cho phép admin API truy cập từ mọi IP (chỉ cho dev)
+    ports:
+      - "8000:8000" # HTTP traffic
+      - "8443:8443" # HTTPS traffic
+      - "8001:8001" # Kong Admin API
+    volumes:
+      - ./kong_config/kong.yaml:/etc/kong/kong.yaml:ro # Mount file cấu hình Kong
+      # - ./kong_plugins:/usr/local/share/lua/5.1/kong/plugins/ # Nếu có custom Lua plugins
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy # Đảm bảo Consul đã sẵn sàng
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -------------------- APPLICATION SERVICES --------------------
+
+  api-gateway-service: # Service Node.js của bạn làm nhiệm vụ REST <-> gRPC
+    build:
+      context: ./services/01-api-gateway
+      dockerfile: Dockerfile
+    container_name: node_api_gateway_service
+    ports:
+      - "3000:3000" # Port mà service Node.js này lắng nghe
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      CONSUL_AGENT_HOST: consul # Host của Consul agent (chính là service 'consul')
+      # Thêm các biến môi trường khác nếu cần
+    volumes:
+      - ./services/01-api-gateway:/usr/src/app # Mount code để live reload
+      - /usr/src/app/node_modules # Để không bị ghi đè bởi volume mount ở trên
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+    # restart: unless-stopped # Tự khởi động lại nếu bị lỗi
+
+  auth-service:
+    build:
+      context: ./services/02-auth-service
+      dockerfile: Dockerfile
+    container_name: auth_service
+    environment:
+      NODE_ENV: development
+      PORT: 50051 # Port nội bộ cho gRPC
+      CONSUL_AGENT_HOST: consul
+      MONGO_URI: ${MONGO_URI_CLOUD}
+    volumes:
+      - ./services/02-auth-service:/usr/src/app
+      - /usr/src/app/node_modules
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+
+  user-service:
+    build:
+      context: ./services/03-user-service
+      dockerfile: Dockerfile
+    container_name: user_service
+    environment:
+      NODE_ENV: development
+      PORT: 50052 # Port nội bộ cho gRPC
+      CONSUL_AGENT_HOST: consul
+      MONGO_URI: ${MONGO_URI_CLOUD}
+    volumes:
+      - ./services/03-user-service:/usr/src/app
+      - /usr/src/app/node_modules
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+
+  event-service:
+    build:
+      context: ./services/04-event-service
+      dockerfile: Dockerfile
+    container_name: event_service
+    environment:
+      NODE_ENV: development
+      PORT: 50053
+      CONSUL_AGENT_HOST: consul
+      MONGO_URI: ${MONGO_URI_CLOUD}
+    volumes:
+      - ./services/04-event-service:/usr/src/app
+      - /usr/src/app/node_modules
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+
+  ticket-service:
+    build:
+      context: ./services/05-ticket-service
+      dockerfile: Dockerfile
+    container_name: ticket_service
+    environment:
+      NODE_ENV: development
+      PORT: 50054
+      CONSUL_AGENT_HOST: consul
+      MONGO_URI: ${MONGO_URI_CLOUD}
+    volumes:
+      - ./services/05-ticket-service:/usr/src/app
+      - /usr/src/app/node_modules
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+
+  blockchain-service:
+    build:
+      context: ./services/06-blockchain-service
+      dockerfile: Dockerfile
+    container_name: blockchain_service
+    environment:
+      NODE_ENV: development
+      PORT: 50055
+      CONSUL_AGENT_HOST: consul
+      MONGO_URI: ${MONGO_URI_CLOUD}
+    volumes:
+      - ./services/06-blockchain-service:/usr/src/app
+      - /usr/src/app/node_modules
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+
+  seatmap-service:
+    build:
+      context: ./services/07-seatmap-service
+      dockerfile: Dockerfile
+    container_name: seatmap_service
+    environment:
+      NODE_ENV: development
+      PORT: 50056
+      CONSUL_AGENT_HOST: consul
+      MONGO_URI: ${MONGO_URI_CLOUD}
+    volumes:
+      - ./services/07-seatmap-service:/usr/src/app
+      - /usr/src/app/node_modules
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+
