@@ -12,7 +12,7 @@ RUN npm ci --omit=dev
 
 COPY . .
 
-COPY protos /usr/src/app/protos
+COPY ../../protos /usr/src/app/protos
 
 EXPOSE 50055
 CMD [ "node", "src/server.js" ]
