@@ -63,11 +63,8 @@ services:
     container_name: node_api_gateway_service
     ports:
       - "3000:3000" # Port mà service Node.js này lắng nghe
-    environment:
-      NODE_ENV: development
-      PORT: 3000
-      CONSUL_AGENT_HOST: consul # Host của Consul agent (chính là service 'consul')
-      # Thêm các biến môi trường khác nếu cần
+    env_file: # Nạp file .env của api-gateway-service
+      - ./services/01-api-gateway/.env
     volumes:
       - ./services/01-api-gateway:/usr/src/app # Mount code để live reload
       - /usr/src/app/node_modules # Để không bị ghi đè bởi volume mount ở trên
@@ -83,11 +80,8 @@ services:
       context: ./services/02-auth-service
       dockerfile: Dockerfile
     container_name: auth_service
-    environment:
-      NODE_ENV: development
-      PORT: 50051 # Port nội bộ cho gRPC
-      CONSUL_AGENT_HOST: consul
-      MONGO_URI: ${MONGO_URI_CLOUD}
+    env_file: # Nạp file .env của auth-service
+      - ./services/02-auth-service/.env
     volumes:
       - ./services/02-auth-service:/usr/src/app
       - /usr/src/app/node_modules
@@ -102,11 +96,8 @@ services:
       context: ./services/03-user-service
       dockerfile: Dockerfile
     container_name: user_service
-    environment:
-      NODE_ENV: development
-      PORT: 50052 # Port nội bộ cho gRPC
-      CONSUL_AGENT_HOST: consul
-      MONGO_URI: ${MONGO_URI_CLOUD}
+    env_file: # Nạp file .env của user-service
+      - ./services/03-user-service/.env
     volumes:
       - ./services/03-user-service:/usr/src/app
       - /usr/src/app/node_modules
@@ -116,79 +107,79 @@ services:
       consul:
         condition: service_healthy
 
-  event-service:
-    build:
-      context: ./services/04-event-service
-      dockerfile: Dockerfile
-    container_name: event_service
-    environment:
-      NODE_ENV: development
-      PORT: 50053
-      CONSUL_AGENT_HOST: consul
-      MONGO_URI: ${MONGO_URI_CLOUD}
-    volumes:
-      - ./services/04-event-service:/usr/src/app
-      - /usr/src/app/node_modules
-    networks:
-      - microservices_network
-    depends_on:
-      consul:
-        condition: service_healthy
+  # event-service:
+  #   build:
+  #     context: ./services/04-event-service
+  #     dockerfile: Dockerfile
+  #   container_name: event_service
+  #   environment:
+  #     NODE_ENV: development
+  #     PORT: 50053
+  #     CONSUL_AGENT_HOST: consul
+  #     MONGO_URI: ${MONGO_URI_CLOUD}
+  #   volumes:
+  #     - ./services/04-event-service:/usr/src/app
+  #     - /usr/src/app/node_modules
+  #   networks:
+  #     - microservices_network
+  #   depends_on:
+  #     consul:
+  #       condition: service_healthy
 
-  ticket-service:
-    build:
-      context: ./services/05-ticket-service
-      dockerfile: Dockerfile
-    container_name: ticket_service
-    environment:
-      NODE_ENV: development
-      PORT: 50054
-      CONSUL_AGENT_HOST: consul
-      MONGO_URI: ${MONGO_URI_CLOUD}
-    volumes:
-      - ./services/05-ticket-service:/usr/src/app
-      - /usr/src/app/node_modules
-    networks:
-      - microservices_network
-    depends_on:
-      consul:
-        condition: service_healthy
+  # ticket-service:
+  #   build:
+  #     context: ./services/05-ticket-service
+  #     dockerfile: Dockerfile
+  #   container_name: ticket_service
+  #   environment:
+  #     NODE_ENV: development
+  #     PORT: 50054
+  #     CONSUL_AGENT_HOST: consul
+  #     MONGO_URI: ${MONGO_URI_CLOUD}
+  #   volumes:
+  #     - ./services/05-ticket-service:/usr/src/app
+  #     - /usr/src/app/node_modules
+  #   networks:
+  #     - microservices_network
+  #   depends_on:
+  #     consul:
+  #       condition: service_healthy
 
-  blockchain-service:
-    build:
-      context: ./services/06-blockchain-service
-      dockerfile: Dockerfile
-    container_name: blockchain_service
-    environment:
-      NODE_ENV: development
-      PORT: 50055
-      CONSUL_AGENT_HOST: consul
-      MONGO_URI: ${MONGO_URI_CLOUD}
-    volumes:
-      - ./services/06-blockchain-service:/usr/src/app
-      - /usr/src/app/node_modules
-    networks:
-      - microservices_network
-    depends_on:
-      consul:
-        condition: service_healthy
+  # blockchain-service:
+  #   build:
+  #     context: ./services/06-blockchain-service
+  #     dockerfile: Dockerfile
+  #   container_name: blockchain_service
+  #   environment:
+  #     NODE_ENV: development
+  #     PORT: 50055
+  #     CONSUL_AGENT_HOST: consul
+  #     MONGO_URI: ${MONGO_URI_CLOUD}
+  #   volumes:
+  #     - ./services/06-blockchain-service:/usr/src/app
+  #     - /usr/src/app/node_modules
+  #   networks:
+  #     - microservices_network
+  #   depends_on:
+  #     consul:
+  #       condition: service_healthy
 
-  seatmap-service:
-    build:
-      context: ./services/07-seatmap-service
-      dockerfile: Dockerfile
-    container_name: seatmap_service
-    environment:
-      NODE_ENV: development
-      PORT: 50056
-      CONSUL_AGENT_HOST: consul
-      MONGO_URI: ${MONGO_URI_CLOUD}
-    volumes:
-      - ./services/07-seatmap-service:/usr/src/app
-      - /usr/src/app/node_modules
-    networks:
-      - microservices_network
-    depends_on:
-      consul:
-        condition: service_healthy
+  # seatmap-service:
+  #   build:
+  #     context: ./services/07-seatmap-service
+  #     dockerfile: Dockerfile
+  #   container_name: seatmap_service
+  #   environment:
+  #     NODE_ENV: development
+  #     PORT: 50056
+  #     CONSUL_AGENT_HOST: consul
+  #     MONGO_URI: ${MONGO_URI_CLOUD}
+  #   volumes:
+  #     - ./services/07-seatmap-service:/usr/src/app
+  #     - /usr/src/app/node_modules
+  #   networks:
+  #     - microservices_network
+  #   depends_on:
+  #     consul:
+  #       condition: service_healthy
 
