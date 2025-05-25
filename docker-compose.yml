@@ -1,7 +1,3 @@
-networks:
-  microservices_network:
-    driver: bridge
-
 services:
   consul:
     image: hashicorp/consul:1.18
@@ -11,7 +7,8 @@ services:
       - "8600:8600/udp"
     command: "agent -server -ui -client=0.0.0.0 -bootstrap-expect=1"
     networks:
-      - microservices_network
+      microservices_network:
+        ipv4_address: 172.23.0.2
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
       interval: 10s
@@ -28,12 +25,12 @@ services:
       KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
       KONG_PLUGINS: bundled,grpc-gateway,jwt
-      KONG_LOG_LEVEL: info
+      KONG_LOG_LEVEL: debug
       KONG_TRUSTED_IPS: "0.0.0.0/0"
       KONG_JWT_SHARED_SECRET_VAR: ${KONG_SHARED_JWT_SECRET}
     dns:
-      - 172.23.0.2
-      - 8.8.8.8
+      - "172.23.0.2"  # IP của Consul - Đặt lên đầu để ưu tiên cho .consul
+      - "8.8.8.8"
     ports:
       - "8000:8000"
       - "8443:8443"
@@ -76,6 +73,15 @@ services:
     depends_on:
       consul:
         condition: service_healthy
+
+networks:
+  microservices_network: # Tên network mà các service của bạn tham chiếu đến
+    driver: bridge
+    ipam: # IP Address Management
+      driver: default
+      config:
+        - subnet: "172.23.0.0/16" # Chọn một dải IP, ví dụ 172.23.0.0/16
+          # gateway: "172.23.0.1" # Tùy chọn, Docker thường tự xử lý gateway
 
   # event-service:
   #   build:
@@ -152,4 +158,6 @@ services:
   #   depends_on:
   #     consul:
   #       condition: service_healthy
+
+
 
