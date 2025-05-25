@@ -4,15 +4,25 @@ ENV NODE_ENV=production
 
 WORKDIR /usr/src/app
 
-COPY package*.json ./
+# Copy package.json và package-lock.json của auth-service
+# từ services/02-auth-service/ (trong build context là thư mục gốc)
+# vào /usr/src/app/ (WORKDIR bên trong image)
+COPY services/02-auth-service/package*.json ./
 
 # Cài đặt chỉ dependencies cho production
-# Ưu tiên dùng npm ci nếu có package-lock.json
 RUN npm ci --omit=dev
 
-COPY . .
+# Copy toàn bộ mã nguồn của auth-service
+# từ services/02-auth-service/ (trong build context là thư mục gốc)
+# vào /usr/src/app/ (WORKDIR bên trong image).
+# Điều này sẽ copy thư mục src/, file server.js, etc. của auth-service vào /usr/src/app/
+COPY services/02-auth-service/. ./  
 
-COPY ../../protos /usr/src/app/protos
+# Copy thư mục protos từ thư mục gốc của dự án (build context)
+# vào /usr/src/app/protos bên trong image.
+COPY protos /usr/src/app/protos
 
 EXPOSE 50051
+
+# Giả sử file entry point là /usr/src/app/src/server.js
 CMD [ "node", "src/server.js" ]

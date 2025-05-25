@@ -1,5 +1,3 @@
-version: '3.8'
-
 networks:
   # Mạng chung cho tất cả các services để có thể giao tiếp với nhau
   microservices_network:
@@ -9,7 +7,7 @@ services:
   # -------------------- INFRASTRUCTURE --------------------
 
   consul:
-    image: consul:1.18 # Nên dùng phiên bản cụ thể
+    image: hashicorp/consul:1.18 # Nên dùng phiên bản cụ thể
     container_name: consul_service_discovery
     ports:
       - "8500:8500" # Consul UI & HTTP API
@@ -33,9 +31,10 @@ services:
       KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
       KONG_DNS_RESOLVER: consul:8600 # Kong sử dụng DNS của Consul để phân giải upstreams
-      KONG_PLUGINS: bundled,grpc-gateway # grpc-gateway rất hữu ích cho việc expose gRPC qua REST
+      KONG_PLUGINS: bundled,grpc-gateway, jwt # grpc-gateway rất hữu ích cho việc expose gRPC qua REST
       KONG_LOG_LEVEL: debug # Cho môi trường dev
       KONG_TRUSTED_IPS: "0.0.0.0/0" # Cho phép admin API truy cập từ mọi IP (chỉ cho dev)
+      KONG_JWT_SHARED_SECRET_VAR: ${KONG_SHARED_JWT_SECRET} # <<< THÊM DÒNG NÀY
     ports:
       - "8000:8000" # HTTP traffic
       - "8443:8443" # HTTPS traffic
@@ -78,8 +77,8 @@ services:
 
   auth-service:
     build:
-      context: ./services/02-auth-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/02-auth-service/Dockerfile
     container_name: auth_service
     env_file: # Nạp file .env của auth-service
       - ./services/02-auth-service/.env
@@ -94,8 +93,8 @@ services:
 
   user-service:
     build:
-      context: ./services/03-user-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/03-user-service/Dockerfile
     container_name: user_service
     env_file: # Nạp file .env của user-service
       - ./services/03-user-service/.env
@@ -110,7 +109,7 @@ services:
 
   # event-service:
   #   build:
-  #     context: ./services/04-event-service
+  #     context: .
   #     dockerfile: Dockerfile
   #   container_name: event_service
   #   environment:
@@ -129,7 +128,7 @@ services:
 
   # ticket-service:
   #   build:
-  #     context: ./services/05-ticket-service
+  #     context: .
   #     dockerfile: Dockerfile
   #   container_name: ticket_service
   #   environment:
@@ -148,7 +147,7 @@ services:
 
   # blockchain-service:
   #   build:
-  #     context: ./services/06-blockchain-service
+  #     context: .
   #     dockerfile: Dockerfile
   #   container_name: blockchain_service
   #   environment:
@@ -167,7 +166,7 @@ services:
 
   # seatmap-service:
   #   build:
-  #     context: ./services/07-seatmap-service
+  #     context: .
   #     dockerfile: Dockerfile
   #   container_name: seatmap_service
   #   environment:

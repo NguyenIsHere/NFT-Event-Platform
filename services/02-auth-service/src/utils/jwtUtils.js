@@ -2,7 +2,8 @@ const jwt = require('jsonwebtoken')
 
 const JWT_SECRET = process.env.JWT_SECRET
 const ACCESS_TOKEN_EXPIRATION = process.env.JWT_ACCESS_TOKEN_EXPIRATION || '15m'
-const REFRESH_TOKEN_EXPIRATION_MS = convertToMillis(
+
+const JWT_REFRESH_TOKEN_EXPIRATION_MS = convertToMillis(
   process.env.JWT_REFRESH_TOKEN_EXPIRATION || '7d'
 )
 
@@ -26,7 +27,7 @@ function convertToMillis (timeStr) {
 
 function generateAccessToken (userId, roles = []) {
   if (!JWT_SECRET) throw new Error('JWT_SECRET is not defined')
-  return jwt.sign({ userId, roles }, JWT_SECRET, {
+  return jwt.sign({ userId, roles, iss: 'my-application' }, JWT_SECRET, {
     expiresIn: ACCESS_TOKEN_EXPIRATION
   })
 }

@@ -1,95 +1,78 @@
 _format_version: "3.0"
-_comment: "Kong declarative configuration with gRPC services and JWT auth"
+_comment: "Kong declarative configuration with shared JWT secret from ENV"
 
-# Định nghĩa các Upstreams - Kong sẽ dùng Consul để tìm các service này
-# Consul sẽ phân giải tên service (ví dụ 'auth-service.service.consul') thành IP:PORT
-# KONG_DNS_RESOLVER trong docker-compose.yml đã được đặt thành consul:8600
+# Không cần khai báo 'consumers' ở đây cho việc xác thực JWT bằng secret chung này.
+# Tuy nhiên, để plugin JWT hoạt động, nó cần một "chỗ dựa" để lưu trữ secret.
+# Cách tốt nhất là tạo một consumer đại diện và gắn JWT credential (với secret từ ENV) cho nó.
 
-#----------------------------------------------------
-# Consumers (Người dùng API - dùng cho plugin xác thực)
-#----------------------------------------------------
 consumers:
-  - username: my-app-client # Ví dụ một client/user của API
-    # Bạn sẽ tạo JWT credential cho consumer này qua Kong Admin API sau khi Kong chạy
-    # Hoặc nếu bạn muốn tự quản lý user/token, plugin jwt có thể validate token bất kỳ
-    # được ký bằng secret chung.
+  - username: default-jwt-consumer # Một consumer đại diện
+    # id: "some-fixed-uuid-for-default-consumer" # (Tùy chọn, để dễ tham chiếu)
+    jwts: # Khai báo JWT credential cho consumer này
+      - key: "my-application" # <<< GIÁ TRỊ NÀY PHẢI KHỚP VỚI 'iss' CLAIM TRONG TOKEN CỦA BẠN
+        algorithm: HS256 # Hoặc thuật toán bạn dùng (ví dụ: HS512)
+        secret: "{env://KONG_JWT_SHARED_SECRET_VAR}" # <<< LẤY SECRET TỪ BIẾN MÔI TRƯỜNG KONG_JWT_SHARED_SECRET_VAR
 
-#----------------------------------------------------
-# Services (Đại diện cho các backend gRPC services)
-#----------------------------------------------------
+# --- Services (auth-grpc-service, user-grpc-service) ---
+# Giữ nguyên như trước, đảm bảo có plugin grpc-gateway
 services:
-  - name: auth-grpc-service # Tên service trên Kong
-    # Kong sẽ dùng Consul để tìm service tên là "auth-service" (đăng ký bởi Node.js app)
-    # trên port 50050 (như định nghĩa trong .env của auth-service)
-    host: auth-service.service.consul # Tên DNS mà Consul cung cấp
-    port: 50050 # Port của gRPC auth-service
+  - name: auth-grpc-service
+    host: auth-service.service.consul
+    port: 50050
     protocol: grpc
-    connect_timeout: 5000
-    read_timeout: 10000
-    write_timeout: 10000
     plugins:
-      # Plugin grpc-gateway để chuyển đổi REST <-> gRPC
       - name: grpc-gateway
         config:
-          proto: /etc/kong/protos/auth.proto # Đường dẫn đến file proto bên trong container Kong
-          # Các cấu hình khác của plugin nếu cần
+          proto: /etc/kong/protos/auth.proto
 
   - name: user-grpc-service
     host: user-service.service.consul
-    port: 50051 # Port của gRPC user-service
+    port: 50051
     protocol: grpc
-    connect_timeout: 5000
-    read_timeout: 10000
-    write_timeout: 10000
     plugins:
       - name: grpc-gateway
         config:
           proto: /etc/kong/protos/user.proto
 
-#----------------------------------------------------
-# Routes (Ánh xạ các public path vào các Services trên Kong)
-#----------------------------------------------------
+# --- Routes ---
 routes:
-  # --- Auth Service Routes ---
-  - name: auth-login-route-v1 # Đặt tên route rõ ràng hơn
+  # Routes không cần xác thực (ví dụ: login, register)
+  - name: auth-login-route-v1
     service: auth-grpc-service
-    paths:
-      - /v1/auth/login # <<< KHỚP VỚI ANNOTATION TRONG auth.proto
-    methods: [POST]
-    strip_path: true # Quan trọng: Sau khi Kong khớp path này, nó sẽ bỏ đi phần /v1/auth/login
-                     # để plugin grpc-gateway có thể xử lý phần còn lại (nếu có) hoặc map đúng.
-                     # Hoặc có thể là false tùy cách plugin xử lý, cần kiểm tra kỹ tài liệu plugin.
-                     # Với grpc-gateway, thường thì path trong annotation là path đầy đủ mà client gọi.
-
-  - name: auth-register-route-v1
-    service: auth-grpc-service
-    paths:
-      - /v1/auth/register # <<< KHỚP VỚI ANNOTATION
-    methods: [POST]
-    strip_path: true # (hoặc false, tùy plugin)
-
-  - name: auth-refresh-token-route-v1
-    service: auth-grpc-service
-    paths:
-      - /v1/auth/refresh-token # <<< KHỚP VỚI ANNOTATION
+    paths: ["/v1/auth/login"]
     methods: [POST]
     strip_path: true
 
-  # --- User Service Routes ---
+  - name: auth-register-route-v1
+    service: auth-grpc-service
+    paths: ["/v1/auth/register"]
+    methods: [POST]
+    strip_path: true
+
+  - name: auth-refresh-token-route-v1
+    service: auth-grpc-service
+    paths: ["/v1/auth/refresh-token"]
+    methods: [POST]
+    strip_path: true
+
+  # Routes cần xác thực JWT (ví dụ: lấy thông tin user)
   - name: user-get-by-id-route-v1
     service: user-grpc-service
-    paths:
-      - /v1/users/{user_id} # <<< KHỚP VỚI ANNOTATION (user_id là path parameter)
+    paths: ["/v1/users/{user_id}"]
     methods: [GET]
-    strip_path: true # (hoặc false)
+    strip_path: true # Hoặc false, tùy cách plugin grpc-gateway xử lý
     plugins:
-      - name: jwt # Áp dụng xác thực JWT cho route này
-
-  - name: user-get-by-email-route-v1
-    service: user-grpc-service
-    paths:
-      - /v1/users/by-email # <<< KHỚP VỚI ANNOTATION (email sẽ là query param)
-    methods: [GET]
-    strip_path: true # (hoặc false)
-    plugins:
-      - name: jwt
+      - name: jwt # Áp dụng plugin JWT
+        config:
+          # Không cần consumer_by nếu bạn chỉ có một credential như trên
+          # và token có 'iss' claim khớp với 'key' của credential.
+          key_claim_name: "iss" # Kong sẽ tìm 'iss' claim trong token để khớp với 'key' của JWT credential.
+          claims_to_verify: ["exp"] # Yêu cầu token phải có claim 'exp' (expiration time)
+          # Nếu token không có 'iss' claim khớp, hoặc bạn muốn một cơ chế fallback:
+          # anonymous: "consumer_id_cua_default_jwt_consumer" # (Nếu bạn đặt ID cố định cho consumer)
+                                                          # Hoặc username: "default-jwt-consumer"
+                                                          # Điều này nói rằng nếu không tìm thấy consumer nào cụ thể
+                                                          # qua 'iss' claim, hãy thử xác thực bằng credential của consumer này.
+                                                          # Hoặc nếu token được xác thực thành công bằng secret từ
+                                                          # 'default-jwt-consumer' mà không có 'iss' khớp,
+                                                          # nó sẽ được coi là của consumer này.

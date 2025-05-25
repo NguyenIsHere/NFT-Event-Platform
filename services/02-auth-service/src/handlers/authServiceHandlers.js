@@ -148,10 +148,11 @@ async function Register (call, callback) {
   }
 }
 
-async function RefreshToken (call, callback) {
+// Đổi tên hàm này
+async function handleRefreshToken (call, callback) {
+  // <<< SỬA TÊN HÀM Ở ĐÂY
   const { refresh_token } = call.request
   try {
-    // 1. Kiểm tra refresh token có trong DB và còn hạn không
     const storedToken = await RefreshToken.findOne({ token: refresh_token })
 
     if (!storedToken) {
@@ -161,15 +162,13 @@ async function RefreshToken (call, callback) {
       })
     }
     if (storedToken.expiryDate.getTime() < Date.now()) {
-      await RefreshToken.deleteOne({ _id: storedToken._id }) // Xóa token hết hạn
+      await RefreshToken.deleteOne({ _id: storedToken._id })
       return callback({
         code: grpc.status.UNAUTHENTICATED,
         message: 'Refresh token expired'
       })
     }
 
-    // 2. Xác thực JWT của refresh token (không bắt buộc nếu bạn tin tưởng token trong DB)
-    // nhưng nên làm để chắc chắn token không bị sửa đổi và lấy thông tin payload.
     const decoded = jwtUtils.verifyToken(refresh_token)
     if (
       !decoded ||
@@ -182,30 +181,23 @@ async function RefreshToken (call, callback) {
       })
     }
 
-    // 3. Tạo access token mới (và có thể cả refresh token mới - tùy chiến lược)
     const newAccessToken = jwtUtils.generateAccessToken(
       decoded.userId,
       decoded.roles
     )
-    // Tùy chọn: Tạo refresh token mới và cập nhật DB (giúp tăng bảo mật - refresh token rotation)
-    // const newRefreshTokenString = jwtUtils.generateRefreshToken(decoded.userId, decoded.roles);
-    // const newRefreshTokenExpiry = jwtUtils.getRefreshTokenExpiryDate();
-    // storedToken.token = newRefreshTokenString;
-    // storedToken.expiryDate = newRefreshTokenExpiry;
-    // await storedToken.save();
 
     callback(null, {
       access_token: newAccessToken,
-      refresh_token: refresh_token // Hoặc newRefreshTokenString nếu bạn tạo mới
+      refresh_token: refresh_token
     })
   } catch (error) {
-    console.error('RefreshToken Error:', error)
+    console.error('RefreshToken Handler Error:', error) // Sửa tên log cho nhất quán
     callback({ code: grpc.status.INTERNAL, message: 'Internal server error' })
   }
 }
 
 module.exports = {
   Login,
-  RefreshToken,
+  RefreshToken: handleRefreshToken, // <<< SỬA Ở ĐÂY KHI EXPORT
   Register
 }
