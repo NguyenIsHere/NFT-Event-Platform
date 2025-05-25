@@ -1,0 +1,99 @@
+# Hướng dẫn chung:
+# - Dòng bắt đầu bằng # là chú thích.
+# - Bỏ qua các file và thư mục được liệt kê.
+# - Dấu ! đứng trước một pattern có nghĩa là KHÔNG bỏ qua file/thư mục đó, ngay cả khi có rule khác bỏ qua nó.
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Cache của các trình quản lý package
+.npm
+.yarnrc # Nếu bạn không muốn chia sẻ cấu hình yarn cụ thể
+.pnpm-store/
+
+# Biến môi trường - Rất quan trọng để không commit file này vì chứa thông tin nhạy cảm!
+.env
+.env.*
+!.env.example # Chỉ commit file .env.example để làm mẫu
+
+# Thư mục node_modules của các service
+# Thay vì liệt kê từng service, ta dùng wildcard
+services/*/node_modules
+# Hoặc nếu bạn có node_modules ở thư mục gốc (ví dụ: cho các script chung)
+node_modules/
+
+# Code đã được sinh ra từ file .proto
+# Vì bạn có script `gen-protos.sh` để tạo code này,
+# nên không cần commit code đã sinh ra. Mỗi developer hoặc CI/CD sẽ tự chạy script này.
+services/*/src/generated/
+
+# Thư mục build/dist (Nếu có service nào build ra thư mục này)
+services/*/dist
+services/*/build
+dist/
+build/
+
+# Các file tạm thời của hệ điều hành
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Các file tạm thời của một số trình soạn thảo
+*~
+*.swp
+*.swo
+
+# Cấu hình của các IDE
+# VSCode
+.vscode/*
+!.vscode/settings.json  # Có thể muốn commit settings chung của project
+!.vscode/extensions.json # Chia sẻ các extension gợi ý cho project
+!.vscode/launch.json     # Cấu hình debug chung (nếu không chứa bí mật)
+# JetBrains (WebStorm, IntelliJ IDEA, etc.)
+.idea/
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+# Atom
+.atom/
+# Eclipse
+.project
+.classpath
+.settings/
+# Netbeans
+nbproject/
+
+# Coverage reports (Kết quả kiểm thử bao phủ code)
+coverage/
+.nyc_output/
+
+# Các file nén là kết quả build (Nếu có)
+*.tar.gz
+*.tgz
+*.zip
+
+# Docker - Thường thì .dockerignore sẽ xử lý việc loại trừ file khỏi build context của Docker
+# Nhưng nếu có file tạm sinh ra trong quá trình làm việc với Docker mà không muốn commit
+# thì có thể thêm vào đây. Hiện tại chưa có gì đặc thù cần thêm.
+
+# Chú thích về package-lock.json / yarn.lock / pnpm-lock.yaml:
+# Đối với các ứng dụng (application), việc commit các file lock này (package-lock.json, yarn.lock, pnpm-lock.yaml)
+# thường được khuyến khích để đảm bảo các bản cài đặt dependencies nhất quán giữa các môi trường
+# và giữa các developer. Vì vậy, chúng KHÔNG được thêm vào .gitignore này.
+
+# Các file đặc thù của dự án mà bạn không muốn commit (ví dụ:
+# - File dump database cục bộ
+# - File cấu hình cục bộ chưa hoàn chỉnh
+#)
+# my-local-db-dump.sql
+# temp-config.yaml

@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package user;
+
+option java_multiple_files = true;
+
+service UserService {
+    rpc GetUserById (UserRequestById) returns (UserResponse) {}
+    rpc GetUserByEmail (UserRequestByEmail) returns (UserResponse) {}
+    rpc GetUserByWalletAddress (UserRequestByWallet) returns (UserResponse) {}
+    rpc CreateUser (CreateUserRequest) returns (UserResponse) {}
+    rpc AuthenticateUser (AuthenticateUserRequest) returns (UserResponse) {} // Thêm endpoint cho login
+}
+
+message UserRequestById {
+    string user_id = 1; // Đổi tên thành user_id để đồng bộ với chuẩn
+}
+
+message UserRequestByEmail {
+    string email = 1;
+}
+
+message UserRequestByWallet {
+    string wallet_address = 1; // Đổi tên thành wallet_address để đồng bộ
+}
+
+message CreateUserRequest {
+    string email = 1;
+    string full_name = 2;
+    string wallet_address = 3;
+    string phone_number = 4;
+    string password = 5;
+    string role = 6;
+    string avatar_cid = 7;
+}
+
+message AuthenticateUserRequest {
+    string email = 1;
+    string password = 2;
+}
+
+message UserResponse {
+    string id = 1;
+    string full_name = 2; // Đổi fullName thành full_name
+    string email = 3;
+    string phone_number = 4; // Đổi phoneNumber thành phone_number
+    string wallet_address = 5; // Đổi walletAddress thành wallet_address
+    string avatar_cid = 6; // Đổi avatarCid thành avatar_cid
+    repeated string ticket_ids = 7; // Đổi ticketIds thành ticket_ids
+    string role = 8;
+
+    // Có thể thêm created_at và updated_at nếu muốn trả về client
+    string created_at = 9;
+    string updated_at = 10;
+}

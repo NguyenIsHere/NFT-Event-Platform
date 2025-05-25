@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package auth;
+
+option java_multiple_files = true;
+
+service AuthService {
+    rpc Login (LoginRequest) returns (LoginResponse) {}
+    rpc RefreshToken (RefreshTokenRequest) returns (RefreshTokenResponse) {}
+    rpc Register (RegisterRequest) returns (RegisterResponse) {} // Thêm endpoint register
+}
+
+// Request và Response cho Login
+message LoginRequest {
+    string email = 1; // Thay username thành email để khớp với User
+    string password = 2;
+}
+
+message LoginResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+}
+
+// Request và Response cho RefreshToken
+message RefreshTokenRequest {
+    string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+}
+
+// Request và Response cho Register
+message RegisterRequest {
+    string full_name = 1;
+    string email = 2;
+    string password = 3;
+    string role = 4; // USER, ORGANIZER, ADMIN
+}
+
+message RegisterResponse {
+    string access_token = 1;
+    string refresh_token = 2;
+}

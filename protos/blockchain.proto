@@ -1,0 +1,75 @@
+syntax = "proto3";
+package blockchain;
+option java_multiple_files = true;
+
+service BlockchainService {
+  // Event management
+  rpc CreateEvent       (CreateEventRequest)     returns (CreateEventResponse);
+  rpc BatchMint         (BatchMintRequest)       returns (BatchMintResponse);
+
+  // Front-end payment flow
+  rpc GetPaymentInfo    (GetPaymentInfoRequest)  returns (GetPaymentInfoResponse);
+  rpc VerifyPayment     (VerifyPaymentRequest)   returns (VerifyPaymentResponse);
+
+  // NFT transfer
+  rpc TransferTicket    (TransferTicketRequest)  returns (TransferTicketResponse);
+}
+
+// --- CreateEvent ---
+message CreateEventRequest {
+  uint64 eventId     = 1;
+  uint64 priceWei    = 2;
+  uint64 totalSupply = 3;
+}
+message CreateEventResponse {
+  bool   success = 1;
+  string txHash  = 2;
+}
+
+// --- BatchMint ---
+message BatchMintRequest {
+  string         to         = 1;
+  repeated string tokenUris = 2;
+  repeated uint64 eventIds  = 3;
+  repeated uint64 sessionIds= 4;
+  repeated uint64 prices    = 5;
+}
+message BatchMintResponse {
+  bool   success = 1;
+  string txHash  = 2;
+}
+
+// --- Payment info for MetaMask ---
+message GetPaymentInfoRequest {
+  string eventId      = 1;
+  string ticketTypeId = 2;
+  string sessionId    = 3;
+}
+message GetPaymentInfoResponse {
+  string contractAddress = 1;
+  string abiJson         = 2;
+  string priceWei        = 3;
+  int32  chainId         = 4;
+}
+
+// --- Verify on‐chain mint tx & extract data ---
+message VerifyPaymentRequest {
+  string txHash = 1;
+}
+message VerifyPaymentResponse {
+  bool   success      = 1;
+  string eventId      = 2;
+  string sessionId    = 3;
+  string tokenId      = 4;
+  string ownerAddress = 5;
+}
+
+// --- TransferTicket ---
+message TransferTicketRequest {
+  string to      = 1;
+  uint64 tokenId = 2;
+}
+message TransferTicketResponse {
+  bool   success = 1;
+  string txHash  = 2;
+}
