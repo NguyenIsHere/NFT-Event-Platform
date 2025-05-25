@@ -54,7 +54,7 @@ function verifyToken (token) {
 }
 
 function getRefreshTokenExpiryDate () {
-  return new Date(Date.now() + REFRESH_TOKEN_EXPIRATION_MS)
+  return new Date(Date.now() + JWT_REFRESH_TOKEN_EXPIRATION_MS)
 }
 
 module.exports = {
