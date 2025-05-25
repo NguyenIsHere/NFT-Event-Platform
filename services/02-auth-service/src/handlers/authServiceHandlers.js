@@ -76,6 +76,7 @@ async function Register (call, callback) {
     // 1. Gọi UserService để tạo user mới
     // Lưu ý: CreateUserRequest của UserService có thể cần nhiều trường hơn
     // AuthService.RegisterRequest chỉ có những trường cơ bản.
+    console.log('Registering user:', { full_name, email, role })
     const createUserRequest = {
       full_name,
       email,
