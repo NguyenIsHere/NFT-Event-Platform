@@ -5,15 +5,16 @@ const protoLoader = require('@grpc/proto-loader')
 const USER_SERVICE_ADDRESS =
   process.env.USER_SERVICE_ADDRESS || 'localhost:50051'
 
-// Đường dẫn tới file user.proto (sẽ được copy vào /usr/src/app/protos/user.proto bởi Docker)
-const USER_PROTO_PATH = path.resolve(process.cwd(), 'protos', 'user.proto')
+const PROTOS_ROOT_DIR_IN_CONTAINER = path.join(process.cwd(), 'protos')
+const USER_PROTO_PATH = path.join(PROTOS_ROOT_DIR_IN_CONTAINER, 'user.proto')
 
 const packageDefinition = protoLoader.loadSync(USER_PROTO_PATH, {
   keepCase: true,
   longs: String,
   enums: String,
   defaults: true,
-  oneofs: true
+  oneofs: true,
+  includeDirs: [PROTOS_ROOT_DIR_IN_CONTAINER] // <<< THÊM DÒNG NÀY
 })
 const userProto = grpc.loadPackageDefinition(packageDefinition).user
 

@@ -1,24 +1,18 @@
 _format_version: "3.0"
-_comment: "Kong declarative configuration with shared JWT secret from ENV"
-
-# Không cần khai báo 'consumers' ở đây cho việc xác thực JWT bằng secret chung này.
-# Tuy nhiên, để plugin JWT hoạt động, nó cần một "chỗ dựa" để lưu trữ secret.
-# Cách tốt nhất là tạo một consumer đại diện và gắn JWT credential (với secret từ ENV) cho nó.
+_comment: "Kong declarative configuration with consumer and JWT credential from ENV"
 
 consumers:
-  - username: default-jwt-consumer # Một consumer đại diện
-    # id: "some-fixed-uuid-for-default-consumer" # (Tùy chọn, để dễ tham chiếu)
-    jwts: # Khai báo JWT credential cho consumer này
-      - key: "my-application" # <<< GIÁ TRỊ NÀY PHẢI KHỚP VỚI 'iss' CLAIM TRONG TOKEN CỦA BẠN
-        algorithm: HS256 # Hoặc thuật toán bạn dùng (ví dụ: HS512)
-        secret: "{env://KONG_JWT_SHARED_SECRET_VAR}" # <<< LẤY SECRET TỪ BIẾN MÔI TRƯỜNG KONG_JWT_SHARED_SECRET_VAR
+  - username: generic-app-user # Tên consumer đại diện
+    jwt_secrets: # <<< SỬ DỤNG TÊN TRƯỜNG NÀY
+      - key: "my-application"      # Giá trị này phải khớp với 'iss' claim trong token của bạn
+        algorithm: HS256           # Hoặc thuật toán bạn dùng (ví dụ: HS512)
+        secret: "{env://KONG_JWT_SHARED_SECRET_VAR}" # Lấy secret từ biến môi trường
 
 # --- Services (auth-grpc-service, user-grpc-service) ---
-# Giữ nguyên như trước, đảm bảo có plugin grpc-gateway
 services:
   - name: auth-grpc-service
     host: auth-service.service.consul
-    port: 50050
+    port: 50051 # Port của gRPC auth-service
     protocol: grpc
     plugins:
       - name: grpc-gateway
@@ -27,7 +21,7 @@ services:
 
   - name: user-grpc-service
     host: user-service.service.consul
-    port: 50051
+    port: 50052 # Port của gRPC user-service (Lưu ý: port này khác với auth-service)
     protocol: grpc
     plugins:
       - name: grpc-gateway
@@ -60,19 +54,9 @@ routes:
     service: user-grpc-service
     paths: ["/v1/users/{user_id}"]
     methods: [GET]
-    strip_path: true # Hoặc false, tùy cách plugin grpc-gateway xử lý
+    strip_path: true
     plugins:
       - name: jwt # Áp dụng plugin JWT
         config:
-          # Không cần consumer_by nếu bạn chỉ có một credential như trên
-          # và token có 'iss' claim khớp với 'key' của credential.
-          key_claim_name: "iss" # Kong sẽ tìm 'iss' claim trong token để khớp với 'key' của JWT credential.
-          claims_to_verify: ["exp"] # Yêu cầu token phải có claim 'exp' (expiration time)
-          # Nếu token không có 'iss' claim khớp, hoặc bạn muốn một cơ chế fallback:
-          # anonymous: "consumer_id_cua_default_jwt_consumer" # (Nếu bạn đặt ID cố định cho consumer)
-                                                          # Hoặc username: "default-jwt-consumer"
-                                                          # Điều này nói rằng nếu không tìm thấy consumer nào cụ thể
-                                                          # qua 'iss' claim, hãy thử xác thực bằng credential của consumer này.
-                                                          # Hoặc nếu token được xác thực thành công bằng secret từ
-                                                          # 'default-jwt-consumer' mà không có 'iss' khớp,
-                                                          # nó sẽ được coi là của consumer này.
+          key_claim_name: "iss"
+          claims_to_verify: ["exp"]

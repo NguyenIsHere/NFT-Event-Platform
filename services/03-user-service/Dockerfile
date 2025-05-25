@@ -16,6 +16,8 @@ COPY services/03-user-service/. ./
 # Copy thư mục protos
 COPY protos /usr/src/app/protos
 
+RUN ls -R /usr/src/app
+
 EXPOSE 50052 
 
 CMD [ "node", "src/server.js" ]

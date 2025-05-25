@@ -22,6 +22,8 @@ COPY services/02-auth-service/. ./
 # vào /usr/src/app/protos bên trong image.
 COPY protos /usr/src/app/protos
 
+RUN ls -R /usr/src/app
+
 EXPOSE 50051
 
 # Giả sử file entry point là /usr/src/app/src/server.js
