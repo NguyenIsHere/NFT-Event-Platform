@@ -8,10 +8,8 @@ const Consul = require('consul')
 const crypto = require('crypto')
 
 // Import từ grpc-health-check
-const health = require('grpc-health-check')
-const HealthService = health.service
-const HealthImplementation = health.HealthImplementation
-
+const healthCheck = require('grpc-health-check')
+const HealthImplementation = healthCheck.HealthImplementation // Đúng tên class constructor
 // Biến môi trường và hằng số
 const SERVICE_TYPE = process.env.SERVICE_TYPE // Sẽ là 'user'
 const PORT = process.env.PORT || 50052
@@ -27,13 +25,13 @@ if (SERVICE_TYPE !== 'user') {
 }
 
 const PROTOS_ROOT_DIR_IN_CONTAINER = path.join(process.cwd(), 'protos')
+
+// Load file proto chính của user-service
 const USER_PROTO_PATH = path.join(PROTOS_ROOT_DIR_IN_CONTAINER, 'user.proto')
-
 console.log(
-  `${SERVICE_NAME}: Attempting to load proto file from: ${USER_PROTO_PATH}`
+  `${SERVICE_NAME}: Attempting to load main proto file from: ${USER_PROTO_PATH}`
 )
-
-const packageDefinition = protoLoader.loadSync(USER_PROTO_PATH, {
+const mainPackageDefinition = protoLoader.loadSync(USER_PROTO_PATH, {
   keepCase: true,
   longs: String,
   enums: String,
@@ -41,15 +39,16 @@ const packageDefinition = protoLoader.loadSync(USER_PROTO_PATH, {
   oneofs: true,
   includeDirs: [PROTOS_ROOT_DIR_IN_CONTAINER]
 })
-const userProto = grpc.loadPackageDefinition(packageDefinition).user
+const userProto = grpc.loadPackageDefinition(mainPackageDefinition).user // 'user' là package name
+const MainServiceDefinitionFromProto = userProto.UserService.service
 
 // Tạo health check service status map
 const statusMap = {
-  '': 'NOT_SERVING', // Trạng thái chung của server
-  [SERVICE_NAME]: 'NOT_SERVING' // Trạng thái cho service cụ thể "user-service"
+  '': 'NOT_SERVING',
+  [SERVICE_NAME]: 'NOT_SERVING'
   // "user.UserService": 'NOT_SERVING', // Tùy chọn
 }
-const grpcHealthCheck = new HealthImplementation(statusMap)
+const healthImplementation = new HealthImplementation(statusMap)
 
 async function main () {
   if (!MONGO_URI) {
@@ -66,8 +65,8 @@ async function main () {
   }
 
   const server = new grpc.Server()
-  server.addService(userProto.UserService.service, userServiceHandlers)
-  server.addService(HealthService, grpcHealthCheck) // Thêm health service
+  server.addService(MainServiceDefinitionFromProto, userServiceHandlers)
+  healthImplementation.addToServer(server) // <--- Sử dụng phương thức của thư viện
 
   server.bindAsync(
     `0.0.0.0:${PORT}`,
@@ -78,12 +77,10 @@ async function main () {
         return
       }
       console.log(`${SERVICE_NAME} gRPC Service running on port ${boundPort}`)
-      server.start()
 
-      // Cập nhật trạng thái health check
-      grpcHealthCheck.setStatus('', 'SERVING')
-      grpcHealthCheck.setStatus(SERVICE_NAME, 'SERVING')
-      // grpcHealthCheck.setStatus("user.UserService", 'SERVING');
+      healthImplementation.setStatus('', 'SERVING')
+      healthImplementation.setStatus(SERVICE_NAME, 'SERVING')
+      // healthImplementation.setStatus("user.UserService", 'SERVING');
       console.log(
         `${SERVICE_NAME} health status set to SERVING for "" and "${SERVICE_NAME}".`
       )
@@ -92,16 +89,14 @@ async function main () {
       const serviceAddressForConsul = SERVICE_NAME
       const instanceId =
         process.env.HOSTNAME || crypto.randomBytes(8).toString('hex')
-      // Sử dụng PORT (đã parse) cho serviceId và check, vì đây là port đã biết trước
       const servicePortForConsul = parseInt(PORT)
-      const serviceId = `${SERVICE_NAME}-${instanceId}-${boundPort}`
+      const serviceId = `${SERVICE_NAME}-${instanceId}-${servicePortForConsul}`
 
       const check = {
         name: `gRPC health check for ${SERVICE_NAME} (${instanceId})`,
-        grpc: `${serviceAddressForConsul}:${servicePortForConsul}`, // Consul sẽ check service health này
-        // grpc_use_tls: false, // Mặc định là false, chỉ cần nếu gRPC service của bạn dùng TLS
+        grpc: `${serviceAddressForConsul}:${servicePortForConsul}`,
         interval: '10s',
-        timeout: '10s', // Thời gian Consul chờ phản hồi từ health check
+        timeout: '5s',
         deregistercriticalserviceafter: '1m'
       }
 
@@ -110,13 +105,13 @@ async function main () {
           name: SERVICE_NAME,
           id: serviceId,
           address: serviceAddressForConsul,
-          port: parseInt(PORT),
+          port: servicePortForConsul,
           tags: ['grpc', 'nodejs', SERVICE_NAME],
           check: check
         })
         .then(() => {
           console.log(
-            `Service ${SERVICE_NAME} (ID: ${serviceId}) registered with Consul on address ${serviceAddressForConsul}:${PORT}`
+            `Service ${SERVICE_NAME} (ID: ${serviceId}) registered with Consul on address ${serviceAddressForConsul}:${servicePortForConsul}`
           )
         })
         .catch(errConsul => {
@@ -130,9 +125,9 @@ async function main () {
         console.log(
           `Deregistering ${serviceId} from Consul for ${SERVICE_NAME}...`
         )
-        grpcHealthCheck.setStatus('', 'NOT_SERVING')
-        grpcHealthCheck.setStatus(SERVICE_NAME, 'NOT_SERVING')
-        // grpcHealthCheck.setStatus("user.UserService", 'NOT_SERVING');
+        healthImplementation.setStatus('', 'NOT_SERVING')
+        healthImplementation.setStatus(SERVICE_NAME, 'NOT_SERVING')
+        // healthImplementation.setStatus("user.UserService", 'NOT_SERVING');
         try {
           await consul.agent.service.deregister(serviceId)
           console.log(`${serviceId} deregistered.`)
