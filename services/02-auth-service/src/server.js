@@ -53,10 +53,29 @@ async function main () {
       console.log(`Auth gRPC Service running on port ${port}`)
       server.start()
 
-      // TODO: Implement Consul registration logic here (tương tự User Service)
-      // const consul = require('consul')({ host: CONSUL_AGENT_HOST });
-      // const serviceName = 'auth-service';
-      // ... (logic đăng ký)
+      // TODO: Implement Consul registration logic here
+      // Ví dụ:
+      const consul = require('consul')({ host: CONSUL_AGENT_HOST })
+      const serviceName = 'user-service'
+      const serviceId = `${serviceName}-${port}` // Đảm bảo ID là duy nhất
+      consul.agent.service.register(
+        {
+          name: serviceName,
+          id: serviceId,
+          address: 'auth-service', // Tên service trong Docker network
+          port: parseInt(PORT),
+          check: {
+            grpc: `auth-service:${PORT}`, // Địa chỉ check gRPC health (cần gRPC health check protocol)
+            interval: '10s',
+            timeout: '5s',
+            deregistercriticalserviceafter: '1m'
+          }
+        },
+        err => {
+          if (err) console.error('Failed to register service with Consul:', err)
+          else console.log(`Service ${serviceName} registered with Consul`)
+        }
+      )
     }
   )
 }

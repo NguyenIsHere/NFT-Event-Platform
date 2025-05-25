@@ -15,4 +15,4 @@ COPY . .
 COPY ../../protos /usr/src/app/protos
 
 EXPOSE 3000
-CMD [ "node", "src/server.js" ]
+CMD [ "node", "src/index.js" ]

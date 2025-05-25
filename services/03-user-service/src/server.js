@@ -51,24 +51,27 @@ async function main () {
 
       // TODO: Implement Consul registration logic here
       // Ví dụ:
-      // const consul = require('consul')({ host: CONSUL_AGENT_HOST });
-      // const serviceName = 'user-service';
-      // const serviceId = `${serviceName}-${port}`; // Đảm bảo ID là duy nhất
-      // consul.agent.service.register({
-      //   name: serviceName,
-      //   id: serviceId,
-      //   address: 'user-service', // Tên service trong Docker network
-      //   port: parseInt(PORT),
-      //   check: {
-      //     grpc: `user-service:${PORT}`, // Địa chỉ check gRPC health (cần gRPC health check protocol)
-      //     interval: '10s',
-      //     timeout: '5s',
-      //     deregistercriticalserviceafter: '1m'
-      //   }
-      // }, (err) => {
-      //   if (err) console.error('Failed to register service with Consul:', err);
-      //   else console.log(`Service ${serviceName} registered with Consul`);
-      // });
+      const consul = require('consul')({ host: CONSUL_AGENT_HOST })
+      const serviceName = 'user-service'
+      const serviceId = `${serviceName}-${port}` // Đảm bảo ID là duy nhất
+      consul.agent.service.register(
+        {
+          name: serviceName,
+          id: serviceId,
+          address: 'user-service', // Tên service trong Docker network
+          port: parseInt(PORT),
+          check: {
+            grpc: `user-service:${PORT}`, // Địa chỉ check gRPC health (cần gRPC health check protocol)
+            interval: '10s',
+            timeout: '5s',
+            deregistercriticalserviceafter: '1m'
+          }
+        },
+        err => {
+          if (err) console.error('Failed to register service with Consul:', err)
+          else console.log(`Service ${serviceName} registered with Consul`)
+        }
+      )
     }
   )
 }

@@ -2,28 +2,56 @@ syntax = "proto3";
 
 package user;
 
-option java_multiple_files = true;
+import "google/api/annotations.proto"; // <<< THÊM DÒNG NÀY
 
 service UserService {
-    rpc GetUserById (UserRequestById) returns (UserResponse) {}
-    rpc GetUserByEmail (UserRequestByEmail) returns (UserResponse) {}
-    rpc GetUserByWalletAddress (UserRequestByWallet) returns (UserResponse) {}
-    rpc CreateUser (CreateUserRequest) returns (UserResponse) {}
-    rpc AuthenticateUser (AuthenticateUserRequest) returns (UserResponse) {} // Thêm endpoint cho login
+    rpc GetUserById (UserRequestById) returns (UserResponse) {
+        // Ánh xạ GET request đến /v1/users/{user_id}
+        // user_id từ path parameter sẽ được map vào trường user_id của UserRequestById
+        option (google.api.http) = {
+            get: "/v1/users/{user_id}"
+        };
+    }
+    rpc GetUserByEmail (UserRequestByEmail) returns (UserResponse) {
+        // Ví dụ: GET /v1/users/by-email?email=test@example.com
+        // email từ query parameter sẽ được map vào trường email của UserRequestByEmail
+        option (google.api.http) = {
+            get: "/v1/users/by-email"
+        };
+    }
+    rpc GetUserByWalletAddress (UserRequestByWallet) returns (UserResponse) {
+        option (google.api.http) = {
+            get: "/v1/users/by-wallet/{wallet_address}"
+        };
+    }
+    rpc CreateUser (CreateUserRequest) returns (UserResponse) {
+        // UserService thường không expose CreateUser trực tiếp qua REST
+        // mà thông qua AuthService.Register. Nếu muốn expose, bạn có thể thêm:
+        // option (google.api.http) = {
+        //     post: "/v1/users"
+        //     body: "*"
+        // };
+    }
+    // AuthenticateUser cũng thường không expose trực tiếp qua REST
+    // mà được AuthService.Login gọi nội bộ.
 }
 
 message UserRequestById {
-    string user_id = 1; // Đổi tên thành user_id để đồng bộ với chuẩn
+    string user_id = 1;
 }
-
-message UserRequestByEmail {
-    string email = 1;
+// ... (các message khác giữ nguyên) ...
+message UserResponse {
+    string id = 1;
+    string full_name = 2;
+    string email = 3;
+    string phone_number = 4;
+    string wallet_address = 5;
+    string avatar_cid = 6;
+    repeated string ticket_ids = 7;
+    string role = 8;
+    string created_at = 9;
+    string updated_at = 10;
 }
-
-message UserRequestByWallet {
-    string wallet_address = 1; // Đổi tên thành wallet_address để đồng bộ
-}
-
 message CreateUserRequest {
     string email = 1;
     string full_name = 2;
@@ -33,23 +61,13 @@ message CreateUserRequest {
     string role = 6;
     string avatar_cid = 7;
 }
-
 message AuthenticateUserRequest {
     string email = 1;
     string password = 2;
 }
-
-message UserResponse {
-    string id = 1;
-    string full_name = 2; // Đổi fullName thành full_name
-    string email = 3;
-    string phone_number = 4; // Đổi phoneNumber thành phone_number
-    string wallet_address = 5; // Đổi walletAddress thành wallet_address
-    string avatar_cid = 6; // Đổi avatarCid thành avatar_cid
-    repeated string ticket_ids = 7; // Đổi ticketIds thành ticket_ids
-    string role = 8;
-
-    // Có thể thêm created_at và updated_at nếu muốn trả về client
-    string created_at = 9;
-    string updated_at = 10;
+message UserRequestByEmail {
+    string email = 1;
+}
+message UserRequestByWallet {
+    string wallet_address = 1;
 }

@@ -42,6 +42,7 @@ services:
       - "8001:8001" # Kong Admin API
     volumes:
       - ./kong_config/kong.yaml:/etc/kong/kong.yaml:ro # Mount file cấu hình Kong
+      - ./protos:/etc/kong/protos:ro
       # - ./kong_plugins:/usr/local/share/lua/5.1/kong/plugins/ # Nếu có custom Lua plugins
     networks:
       - microservices_network
@@ -56,24 +57,24 @@ services:
 
   # -------------------- APPLICATION SERVICES --------------------
 
-  api-gateway-service: # Service Node.js của bạn làm nhiệm vụ REST <-> gRPC
-    build:
-      context: ./services/01-api-gateway
-      dockerfile: Dockerfile
-    container_name: node_api_gateway_service
-    ports:
-      - "3000:3000" # Port mà service Node.js này lắng nghe
-    env_file: # Nạp file .env của api-gateway-service
-      - ./services/01-api-gateway/.env
-    volumes:
-      - ./services/01-api-gateway:/usr/src/app # Mount code để live reload
-      - /usr/src/app/node_modules # Để không bị ghi đè bởi volume mount ở trên
-    networks:
-      - microservices_network
-    depends_on:
-      consul:
-        condition: service_healthy
-    # restart: unless-stopped # Tự khởi động lại nếu bị lỗi
+  # api-gateway-service: # Service Node.js của bạn làm nhiệm vụ REST <-> gRPC
+  #   build:
+  #     context: ./services/01-api-gateway
+  #     dockerfile: Dockerfile
+  #   container_name: node_api_gateway_service
+  #   ports:
+  #     - "3000:3000" # Port mà service Node.js này lắng nghe
+  #   env_file: # Nạp file .env của api-gateway-service
+  #     - ./services/01-api-gateway/.env
+  #   volumes:
+  #     - ./services/01-api-gateway:/usr/src/app # Mount code để live reload
+  #     - /usr/src/app/node_modules # Để không bị ghi đè bởi volume mount ở trên
+  #   networks:
+  #     - microservices_network
+  #   depends_on:
+  #     consul:
+  #       condition: service_healthy
+  #   # restart: unless-stopped # Tự khởi động lại nếu bị lỗi
 
   auth-service:
     build:

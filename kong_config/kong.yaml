@@ -1,0 +1,95 @@
+_format_version: "3.0"
+_comment: "Kong declarative configuration with gRPC services and JWT auth"
+
+# Định nghĩa các Upstreams - Kong sẽ dùng Consul để tìm các service này
+# Consul sẽ phân giải tên service (ví dụ 'auth-service.service.consul') thành IP:PORT
+# KONG_DNS_RESOLVER trong docker-compose.yml đã được đặt thành consul:8600
+
+#----------------------------------------------------
+# Consumers (Người dùng API - dùng cho plugin xác thực)
+#----------------------------------------------------
+consumers:
+  - username: my-app-client # Ví dụ một client/user của API
+    # Bạn sẽ tạo JWT credential cho consumer này qua Kong Admin API sau khi Kong chạy
+    # Hoặc nếu bạn muốn tự quản lý user/token, plugin jwt có thể validate token bất kỳ
+    # được ký bằng secret chung.
+
+#----------------------------------------------------
+# Services (Đại diện cho các backend gRPC services)
+#----------------------------------------------------
+services:
+  - name: auth-grpc-service # Tên service trên Kong
+    # Kong sẽ dùng Consul để tìm service tên là "auth-service" (đăng ký bởi Node.js app)
+    # trên port 50050 (như định nghĩa trong .env của auth-service)
+    host: auth-service.service.consul # Tên DNS mà Consul cung cấp
+    port: 50050 # Port của gRPC auth-service
+    protocol: grpc
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
+    plugins:
+      # Plugin grpc-gateway để chuyển đổi REST <-> gRPC
+      - name: grpc-gateway
+        config:
+          proto: /etc/kong/protos/auth.proto # Đường dẫn đến file proto bên trong container Kong
+          # Các cấu hình khác của plugin nếu cần
+
+  - name: user-grpc-service
+    host: user-service.service.consul
+    port: 50051 # Port của gRPC user-service
+    protocol: grpc
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /etc/kong/protos/user.proto
+
+#----------------------------------------------------
+# Routes (Ánh xạ các public path vào các Services trên Kong)
+#----------------------------------------------------
+routes:
+  # --- Auth Service Routes ---
+  - name: auth-login-route-v1 # Đặt tên route rõ ràng hơn
+    service: auth-grpc-service
+    paths:
+      - /v1/auth/login # <<< KHỚP VỚI ANNOTATION TRONG auth.proto
+    methods: [POST]
+    strip_path: true # Quan trọng: Sau khi Kong khớp path này, nó sẽ bỏ đi phần /v1/auth/login
+                     # để plugin grpc-gateway có thể xử lý phần còn lại (nếu có) hoặc map đúng.
+                     # Hoặc có thể là false tùy cách plugin xử lý, cần kiểm tra kỹ tài liệu plugin.
+                     # Với grpc-gateway, thường thì path trong annotation là path đầy đủ mà client gọi.
+
+  - name: auth-register-route-v1
+    service: auth-grpc-service
+    paths:
+      - /v1/auth/register # <<< KHỚP VỚI ANNOTATION
+    methods: [POST]
+    strip_path: true # (hoặc false, tùy plugin)
+
+  - name: auth-refresh-token-route-v1
+    service: auth-grpc-service
+    paths:
+      - /v1/auth/refresh-token # <<< KHỚP VỚI ANNOTATION
+    methods: [POST]
+    strip_path: true
+
+  # --- User Service Routes ---
+  - name: user-get-by-id-route-v1
+    service: user-grpc-service
+    paths:
+      - /v1/users/{user_id} # <<< KHỚP VỚI ANNOTATION (user_id là path parameter)
+    methods: [GET]
+    strip_path: true # (hoặc false)
+    plugins:
+      - name: jwt # Áp dụng xác thực JWT cho route này
+
+  - name: user-get-by-email-route-v1
+    service: user-grpc-service
+    paths:
+      - /v1/users/by-email # <<< KHỚP VỚI ANNOTATION (email sẽ là query param)
+    methods: [GET]
+    strip_path: true # (hoặc false)
+    plugins:
+      - name: jwt

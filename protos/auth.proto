@@ -2,17 +2,34 @@ syntax = "proto3";
 
 package auth;
 
-option java_multiple_files = true;
+import "google/api/annotations.proto"; // <<< THÊM DÒNG NÀY
 
 service AuthService {
-    rpc Login (LoginRequest) returns (LoginResponse) {}
-    rpc RefreshToken (RefreshTokenRequest) returns (RefreshTokenResponse) {}
-    rpc Register (RegisterRequest) returns (RegisterResponse) {} // Thêm endpoint register
+    rpc Login (LoginRequest) returns (LoginResponse) {
+        // Ánh xạ POST request đến /v1/auth/login sẽ gọi RPC Login này
+        // Toàn bộ JSON body của HTTP request sẽ được map vào LoginRequest
+        option (google.api.http) = {
+            post: "/v1/auth/login"
+            body: "*"
+        };
+    }
+    rpc RefreshToken (RefreshTokenRequest) returns (RefreshTokenResponse) {
+        option (google.api.http) = {
+            post: "/v1/auth/refresh-token"
+            body: "*"
+        };
+    }
+    rpc Register (RegisterRequest) returns (RegisterResponse) {
+        option (google.api.http) = {
+            post: "/v1/auth/register"
+            body: "*"
+        };
+    }
 }
 
 // Request và Response cho Login
 message LoginRequest {
-    string email = 1; // Thay username thành email để khớp với User
+    string email = 1;
     string password = 2;
 }
 
