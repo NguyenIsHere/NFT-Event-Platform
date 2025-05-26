@@ -24,7 +24,7 @@ COPY protos /usr/src/app/protos
 
 RUN ls -R /usr/src/app
 
-EXPOSE 50051
+EXPOSE 50052
 
 # Giả sử file entry point là /usr/src/app/src/server.js
 CMD [ "node", "src/server.js" ]

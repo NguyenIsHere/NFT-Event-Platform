@@ -18,6 +18,6 @@ COPY protos /usr/src/app/protos
 
 RUN ls -R /usr/src/app
 
-EXPOSE 50052 
+EXPOSE 50053
 
 CMD [ "node", "src/server.js" ]

@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package ipfs; // Đổi tên package thành "ipfs" cho ngắn gọn
+
+import "google/api/annotations.proto";
+
+// Service để tương tác với IPFS (qua Pinata)
+service IpfsService {
+  // Upload một file (ví dụ: ảnh, video) lên IPFS qua Pinata
+  // Client gửi JSON body chứa file_content (base64) và các tùy chọn.
+  rpc PinFileToIPFS(PinFileRequest) returns (PinResponse) {
+    option (google.api.http) = {
+      post: "/v1/ipfs/pin_file"
+      body: "*"
+    };
+  }
+
+  // Upload một đối tượng JSON lên IPFS qua Pinata (ví dụ: metadata cho NFT)
+  // Client tự xây dựng chuỗi JSON và gửi lên.
+  rpc PinJSONToIPFS(PinJSONRequest) returns (PinResponse) {
+    option (google.api.http) = {
+      post: "/v1/ipfs/pin_json"
+      body: "*"
+    };
+  }
+}
+
+// Request để pin file
+message PinFileRequest {
+  bytes file_content = 1;         // Nội dung file dưới dạng bytes.
+                                  // Khi gọi qua HTTP JSON (Kong), client nên gửi dưới dạng chuỗi base64.
+  string original_file_name = 2;  // Tùy chọn: Tên file gốc, Pinata có thể sử dụng tên này.
+  PinataOptions options = 3;      // Tùy chọn: Các tùy chọn dành riêng cho Pinata.
+}
+
+// Request để pin JSON
+message PinJSONRequest {
+  string json_content = 1;        // Dữ liệu JSON dưới dạng một chuỗi.
+  PinataOptions options = 2;      // Tùy chọn: Các tùy chọn dành riêng cho Pinata.
+}
+
+// Các tùy chọn Pinata (tùy chọn) cho một pin
+message PinataOptions {
+  string pin_name = 1;                 // Tên cho pin này trên Pinata.
+  map<string, string> key_values = 2;  // Metadata tùy chỉnh (dạng key-value) cho pin trên Pinata.
+                                       // Lưu ý: key và value của Pinata phải là chuỗi.
+}
+
+// Phản hồi chung cho các hoạt động pin
+message PinResponse {
+  string ipfs_hash = 1;        // CID (Content Identifier) của nội dung đã được pin.
+  int64 pin_size_bytes = 2;    // Kích thước (bytes) của nội dung đã được pin.
+  string timestamp = 3;        // Dấu thời gian (ISO 8601) khi nội dung được pin.
+  string gateway_url = 4;      // URL công khai qua gateway để truy cập nội dung (ví dụ: gateway của Pinata).
+}

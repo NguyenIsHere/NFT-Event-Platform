@@ -4,8 +4,6 @@ package user;
 
 import "google/api/annotations.proto"; // <<< THÊM DÒNG NÀY
 
-option java_multiple_files = true;
-
 service UserService {
     rpc GetUserById (UserRequestById) returns (UserResponse) {
         // Ánh xạ GET request đến /v1/users/{user_id}

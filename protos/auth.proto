@@ -4,8 +4,6 @@ package auth;
 
 import "google/api/annotations.proto"; // <<< THÊM DÒNG NÀY
 
-option java_multiple_files = true;
-
 service AuthService {
     rpc Login (LoginRequest) returns (LoginResponse) {
         // Ánh xạ POST request đến /v1/auth/login sẽ gọi RPC Login này

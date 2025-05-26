@@ -1,0 +1,21 @@
+{
+  "name": "08-ipfs-service",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@grpc/proto-loader": "^0.7.15",
+    "axios": "^1.9.0",
+    "consul": "^2.0.1",
+    "dotenv": "^16.5.0",
+    "form-data": "^4.0.2",
+    "mongoose": "^8.15.0",
+    "uuid": "^11.1.0"
+  }
+}

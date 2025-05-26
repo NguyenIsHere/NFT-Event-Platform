@@ -39,7 +39,7 @@ const healthCheck = require('grpc-health-check')
 const HealthImplementation = healthCheck.HealthImplementation // Đúng tên class constructor
 // Biến môi trường và hằng số
 const SERVICE_TYPE = process.env.SERVICE_TYPE // Sẽ là 'user'
-const PORT = process.env.PORT || 50052
+const PORT = process.env.PORT || 50053
 const MONGO_URI = process.env.MONGO_URI
 const CONSUL_AGENT_HOST = process.env.CONSUL_AGENT_HOST || 'consul'
 const SERVICE_NAME = 'user-service'
