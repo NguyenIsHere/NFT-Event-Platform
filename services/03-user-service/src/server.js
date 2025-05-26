@@ -6,6 +6,33 @@ const mongoose = require('mongoose')
 const userServiceHandlers = require('./handlers/userServiceHandlers')
 const Consul = require('consul')
 const crypto = require('crypto')
+const os = require('os')
+
+function getServiceIP () {
+  const interfaces = os.networkInterfaces()
+
+  // Ưu tiên IP thuộc Docker network
+  for (const name of Object.keys(interfaces)) {
+    for (const interface of interfaces[name]) {
+      if (interface.family === 'IPv4' && !interface.internal) {
+        if (interface.address.startsWith('172.23.')) {
+          return interface.address
+        }
+      }
+    }
+  }
+
+  // Fallback
+  for (const name of Object.keys(interfaces)) {
+    for (const interface of interfaces[name]) {
+      if (interface.family === 'IPv4' && !interface.internal) {
+        return interface.address
+      }
+    }
+  }
+
+  throw new Error('Cannot find suitable IP address')
+}
 
 // Import từ grpc-health-check
 const healthCheck = require('grpc-health-check')
@@ -102,11 +129,14 @@ async function main () {
         deregistercriticalserviceafter: '1m'
       }
 
+      const serviceIP = getServiceIP()
+
       consul.agent.service
         .register({
           name: SERVICE_NAME,
           id: serviceId,
-          address: serviceAddressForConsul,
+          // address: serviceAddressForConsul,
+          address: serviceIP,
           port: servicePortForConsul,
           tags: ['grpc', 'nodejs', SERVICE_NAME],
           check: check

@@ -5,6 +5,7 @@ services:
     ports:
       - "8500:8500"
       - "8600:8600/udp"
+      - "8600:8600/tcp"  # DNS cũng có thể dùng TCP
     command: "agent -server -ui -client=0.0.0.0 -bootstrap-expect=1"
     networks:
       microservices_network:
@@ -28,9 +29,12 @@ services:
       KONG_LOG_LEVEL: debug
       KONG_TRUSTED_IPS: "0.0.0.0/0"
       KONG_JWT_SHARED_SECRET_VAR: ${KONG_SHARED_JWT_SECRET}
-      KONG_DNS_RESOLVER: 172.23.0.2:8600
+      KONG_DNS_RESOLVER: '172.23.0.2:8600'
+      KONG_DNS_ORDER: 'LAST,SRV,A,CNAME' # Thử SRV trước
     dns:
       - "172.23.0.2"  # IP của Consul - Đặt lên đầu để ưu tiên cho .consul
+      - "8.8.8.8"     # DNS công cộng
+      - "1.1.1.1"    # DNS của Cloudflare
     ports:
       - "8000:8000"
       - "8443:8443"
@@ -51,6 +55,10 @@ services:
     container_name: auth_service
     env_file:
       - ./services/02-auth-service/.env
+    dns:
+    - "172.23.0.2"
+    - "8.8.8.8"    # DNS của Google (cho tên miền internet)
+    - "1.1.1.1"    # DNS của Cloudflare
     networks:
       - microservices_network
     depends_on:
@@ -64,6 +72,10 @@ services:
     container_name: user_service
     env_file:
       - ./services/03-user-service/.env
+    dns:
+    - "172.23.0.2"
+    - "8.8.8.8"    # DNS của Google (cho tên miền internet)
+    - "1.1.1.1"    # DNS của Cloudflare
     networks:
       - microservices_network
     depends_on:

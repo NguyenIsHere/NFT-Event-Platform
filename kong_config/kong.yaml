@@ -11,8 +11,8 @@ consumers:
 # --- Services (auth-grpc-service, user-grpc-service) ---
 services:
   - name: auth-grpc-service
-    host: 172.23.0.3 
-    # host: auth-service.service.consul
+    # host: 172.23.0.3 
+    host: auth-service.service.consul
     port: 50051 # Port của gRPC auth-service
     protocol: grpc
     plugins:
@@ -21,8 +21,8 @@ services:
           proto: /etc/kong/protos/auth.proto
 
   - name: user-grpc-service
-    host: 172.23.0.4 
-    # host:  user-service.service.consul
+    # host: 172.23.0.4 
+    host:  user-service.service.consul
     port: 50052 # Port của gRPC user-service (Lưu ý: port này khác với auth-service)
     protocol: grpc
     plugins:
