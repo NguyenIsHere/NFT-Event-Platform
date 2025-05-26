@@ -88,26 +88,35 @@ async function CreateUser (call, callback) {
     const {
       email,
       full_name,
-      wallet_address,
+      wallet_address, // từ gRPC request
       phone_number,
       password,
       role,
       avatar_cid
     } = call.request
 
-    const existingUser = await User.findOne({ email })
-    if (existingUser) {
+    // 1. Kiểm tra email đã tồn tại chưa
+    const existingUserByEmail = await User.findOne({ email })
+    if (existingUserByEmail) {
       return callback({
         code: grpc.status.ALREADY_EXISTS,
         message: 'User with this email already exists'
       })
     }
 
-    if (wallet_address) {
-      const existingWalletUser = await User.findOne({
-        walletAddress: wallet_address
+    // 2. Xử lý wallet_address: chuyển "" thành undefined
+    let processedWalletAddress = wallet_address
+    if (wallet_address === '') {
+      processedWalletAddress = undefined
+    }
+
+    // 3. Kiểm tra walletAddress đã tồn tại chưa (chỉ khi processedWalletAddress có giá trị thực sự)
+    if (processedWalletAddress) {
+      // Sẽ bỏ qua nếu processedWalletAddress là undefined
+      const existingUserByWallet = await User.findOne({
+        walletAddress: processedWalletAddress
       })
-      if (existingWalletUser) {
+      if (existingUserByWallet) {
         return callback({
           code: grpc.status.ALREADY_EXISTS,
           message: 'User with this wallet address already exists'
@@ -115,20 +124,24 @@ async function CreateUser (call, callback) {
       }
     }
 
+    // 4. Tạo người dùng mới
     const newUser = new User({
       email,
-      fullName: full_name,
-      walletAddress: wallet_address,
+      fullName: full_name, // Ánh xạ full_name từ request sang fullName trong model
+      walletAddress: processedWalletAddress, // Sử dụng giá trị đã xử lý
       phoneNumber: phone_number,
-      password, // Mongoose pre-save hook sẽ hash password này
-      role: role || 'USER',
+      password, // Hook pre-save của Mongoose sẽ hash password này
+      role: role || 'USER', // Gán vai trò mặc định nếu không được cung cấp
       avatarCid: avatar_cid
     })
 
-    const savedUser = await newUser.save()
+    const savedUser = await newUser.save() // Việc save() bây giờ sẽ không gây lỗi E11000 cho nhiều walletAddress rỗng (thành undefined) nữa
+
+    // 5. Trả về response
     callback(null, userToUserResponse(savedUser))
   } catch (error) {
-    console.error('CreateUser Error:', error)
+    console.error('CreateUser Error in UserService:', error) // Log lỗi chi tiết ở user-service
+
     // Xử lý lỗi validation của Mongoose
     if (error.name === 'ValidationError') {
       return callback({
@@ -138,9 +151,28 @@ async function CreateUser (call, callback) {
           .join(', ')
       })
     }
+
+    // Xử lý lỗi duplicate key từ MongoDB (E11000) nếu các kiểm tra findOne ở trên bỏ sót (ví dụ do race condition)
+    if (error.code === 11000) {
+      let duplicateField = 'Unknown unique field'
+      // Phân tích chi tiết hơn lỗi E11000 nếu cần, ví dụ dựa vào error.keyPattern hoặc error.keyValue
+      if (error.message && error.message.includes('email_1')) {
+        // Giả sử index của email có tên 'email_1'
+        duplicateField = 'Email'
+      } else if (error.message && error.message.includes('walletAddress_1')) {
+        // Lỗi này xảy ra nếu một walletAddress cụ thể (không rỗng) bị trùng
+        duplicateField = 'Wallet address'
+      }
+      return callback({
+        code: grpc.status.ALREADY_EXISTS,
+        message: `${duplicateField} already exists (database constraint).`
+      })
+    }
+
+    // Các lỗi không xác định khác
     callback({
       code: grpc.status.INTERNAL,
-      message: 'Error creating user'
+      message: error.message || 'Error creating user in UserService' // Cung cấp thông báo lỗi rõ hơn nếu có
     })
   }
 }
