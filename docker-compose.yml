@@ -81,6 +81,23 @@ services:
     depends_on:
       consul:
         condition: service_healthy
+        
+  ipfs-service: # Service số 8
+    build:
+      context: .
+      dockerfile: ./services/08-ipfs-service/Dockerfile # Đường dẫn đến Dockerfile của ipfs-service
+    container_name: ipfs_service
+    env_file:
+      - ./services/08-ipfs-service/.env # PORT=50058 trong file này
+    dns:
+      - "172.23.0.2" # Consul DNS
+      - "8.8.8.8"
+      - "1.1.1.1"
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
 
 networks:
   microservices_network: # Tên network mà các service của bạn tham chiếu đến

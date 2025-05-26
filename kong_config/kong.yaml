@@ -29,6 +29,15 @@ services:
       - name: grpc-gateway
         config:
           proto: /etc/kong/protos/user.proto
+  
+  - name: ipfs-grpc-service # Service mới cho IPFS
+    host: ipfs-service.service.consul # Sử dụng tên service từ Consul
+    port: 50058 # Port của ipfs-service
+    protocol: grpc
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /etc/kong/protos/ipfs.proto # Đường dẫn đến ipfs.proto trong container Kong
 
 # --- Routes ---
 routes:
@@ -62,3 +71,27 @@ routes:
         config:
           key_claim_name: "iss"
           claims_to_verify: ["exp"]
+  
+  # --- IPFS Service Routes ---
+  # Giả sử các route này cần xác thực JWT, nếu không thì bỏ plugin jwt
+  - name: ipfs-pin-file-route-v1
+    service: ipfs-grpc-service
+    paths: ["/v1/ipfs/pin_file"]
+    methods: [POST]
+    strip_path: true
+    # plugins: # Bỏ comment nếu cần JWT
+    #   - name: jwt
+    #     config:
+    #       key_claim_name: "iss"
+    #       claims_to_verify: ["exp"]
+
+  - name: ipfs-pin-json-route-v1
+    service: ipfs-grpc-service
+    paths: ["/v1/ipfs/pin_json"]
+    methods: [POST]
+    strip_path: true
+    # plugins: # Bỏ comment nếu cần JWT
+    #   - name: jwt
+    #     config:
+    #       key_claim_name: "iss"
+    #       claims_to_verify: ["exp"]

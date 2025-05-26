@@ -1,29 +1,38 @@
-FROM node:20-alpine
+# Sử dụng Node.js 20 Alpine làm image cơ sở
+FROM node:20-alpine AS base
 
-# Thiết lập thư mục làm việc bên trong container
+# Đặt biến môi trường cho production
+ENV NODE_ENV=production
+
+# Đặt thư mục làm việc bên trong image
 WORKDIR /usr/src/app
 
-# Sao chép package.json và package-lock.json (hoặc yarn.lock) vào thư mục làm việc
+# Sao chép package.json và package-lock.json (hoặc yarn.lock) của ipfs-service
+# từ services/08-ipfs-service/ (trong build context là thư mục gốc của dự án)
+# vào /usr/src/app/ (WORKDIR bên trong image)
 COPY services/08-ipfs-service/package*.json ./
 
-# Cài đặt các dependencies cho production
+# Cài đặt chỉ dependencies cần thiết cho production
+# npm ci sẽ cài đặt chính xác các phiên bản trong package-lock.json
 RUN npm ci --omit=dev
 
-# Sao chép thư mục src của service này vào thư mục src trong container
-COPY services/08-ipfs-service/src ./src
+# Sao chép toàn bộ mã nguồn của ipfs-service (bao gồm thư mục src/ và file .env)
+# từ services/08-ipfs-service/ (trong build context là thư mục gốc)
+# vào /usr/src/app/ (WORKDIR bên trong image).
+COPY services/08-ipfs-service/. ./
 
-# Sao chép file .env của service này vào thư mục làm việc trong container
-COPY services/08-ipfs-service/.env ./.env
+# Sao chép thư mục protos dùng chung từ thư mục gốc của dự án (build context)
+# vào /usr/src/app/protos bên trong image.
+# Điều này đảm bảo server.js trong src/ có thể truy cập ../protos/ipfs.proto
+COPY protos /usr/src/app/protos
 
-# Sao chép thư mục protos dùng chung từ gốc dự án vào thư mục protos bên trong thư mục làm việc của service
-# Điều này giúp server.js trong src/ có thể load proto từ ./protos/ipfs.proto (tương đối với /usr/src/app)
-COPY protos ./protos 
+# (Tùy chọn) Liệt kê cấu trúc thư mục bên trong image để debug
+RUN ls -R /usr/src/app
 
-# (Tùy chọn) Liệt kê file để debug đường dẫn trong quá trình build
-RUN ls -R .
+# Expose port mà ipfs-service sẽ lắng nghe (50058 theo quy ước của bạn)
+# Biến PORT này cũng nên được định nghĩa trong file .env của ipfs-service
+EXPOSE ${PORT:-50058}
 
-# Expose port mà service sẽ chạy (lấy từ biến môi trường hoặc mặc định)
-EXPOSE 50058
-
-# Lệnh để chạy service
+# Lệnh để chạy ứng dụng
+# Giả sử file entry point của bạn là /usr/src/app/src/server.js
 CMD [ "node", "src/server.js" ]
