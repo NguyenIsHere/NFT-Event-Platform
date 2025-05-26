@@ -51,8 +51,6 @@ services:
     container_name: auth_service
     env_file:
       - ./services/02-auth-service/.env
-    ports: # <<< THÊM HOẶC BỎ COMMENT DÒNG NÀY VÀ DÒNG DƯỚI
-      - "50051:50051" # Ánh xạ port 50050 của container ra port 50050 của máy host
     networks:
       - microservices_network
     depends_on:
@@ -66,8 +64,6 @@ services:
     container_name: user_service
     env_file:
       - ./services/03-user-service/.env
-    ports: # <<< THÊM HOẶC BỎ COMMENT DÒNG NÀY VÀ DÒNG DƯỚI
-      - "50052:50052" # Ánh xạ port 50050 của container ra port 50050 của máy host
     networks:
       - microservices_network
     depends_on:

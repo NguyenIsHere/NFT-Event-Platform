@@ -86,8 +86,8 @@ async function main () {
       )
 
       const consul = new Consul({ host: CONSUL_AGENT_HOST, promisify: true })
-      // const serviceAddressForConsul = SERVICE_NAME
-      const serviceAddressForConsul = '172.23.0.4'
+      const serviceAddressForConsul = SERVICE_NAME
+      // const serviceAddressForConsul = '172.23.0.4'
 
       const instanceId =
         process.env.HOSTNAME || crypto.randomBytes(8).toString('hex')
