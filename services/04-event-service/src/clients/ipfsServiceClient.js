@@ -20,6 +20,7 @@ const IPFS_SERVICE_ADDRESS =
   process.env.IPFS_SERVICE_ADDRESS || 'localhost:50058' // Lấy từ .env
 
 console.log(`EventService: IPFS client connecting to ${IPFS_SERVICE_ADDRESS}`)
+
 const ipfsServiceClient = new ipfsProto.IpfsService(
   IPFS_SERVICE_ADDRESS,
   grpc.credentials.createInsecure()

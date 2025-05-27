@@ -37,7 +37,7 @@ services:
         config:
           proto: /etc/kong/protos/ipfs.proto
 
-  - name: event-grpc-service # SERVICE MỚI CHO EVENT
+  - name: event-grpc-service
     host: event-service.service.consul
     port: 50054 # Port của event-service
     protocol: grpc
@@ -46,19 +46,19 @@ services:
         config:
           proto: /etc/kong/protos/event.proto
 
-  - name: ticket-grpc-service # SERVICE MỚI CHO TICKET (bao gồm TicketType)
+  - name: ticket-grpc-service # Service này host cả TicketService và TicketTypeService
     host: ticket-service.service.consul
     port: 50055 # Port của ticket-service
     protocol: grpc
     plugins:
       - name: grpc-gateway
         config:
-          proto: /etc/kong/protos/ticket.proto # File này chứa cả TicketService và TicketTypeService
+          proto: /etc/kong/protos/ticket.proto
 
-  # BlockchainService thường không expose qua Kong trừ khi có nhu cầu đặc biệt
+  # BlockchainService thường không expose qua Kong
   # - name: blockchain-grpc-service
   #   host: blockchain-service.service.consul
-  #   port: 50056 # Port của blockchain-service
+  #   port: 50056
   #   protocol: grpc
   #   plugins:
   #     - name: grpc-gateway
@@ -93,7 +93,24 @@ routes:
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
-  # Thêm các route khác cho user-service nếu có
+  # Thêm các route khác cho user-service nếu có (ví dụ GetUserByEmail, GetUserByWalletAddress)
+  - name: user-get-by-email-route-v1
+    service: user-grpc-service
+    paths: ["/v1/users/by-email"] # Path cho GetUserByEmail
+    methods: [GET]
+    strip_path: true
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+  - name: user-get-by-wallet-route-v1
+    service: user-grpc-service
+    paths: ["/v1/users/by-wallet/{wallet_address}"] # Path cho GetUserByWalletAddress
+    methods: [GET]
+    strip_path: true
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
 
   # === IPFS Service Routes ===
   - name: ipfs-pin-file-route-v1
@@ -104,7 +121,7 @@ routes:
     # Thêm plugin jwt nếu cần bảo vệ
   - name: ipfs-pin-json-route-v1
     service: ipfs-grpc-service
-    paths: ["/v1/ipfs/pin_json"]
+    paths: ["/v1/ipfs/pin_json"] # Path này đã đúng theo proto mới nhất của bạn
     methods: [POST]
     strip_path: true
     # Thêm plugin jwt nếu cần bảo vệ
@@ -115,8 +132,7 @@ routes:
     paths: ["/v1/events"]
     methods: [POST]
     strip_path: true
-    # Thêm plugin jwt nếu route này cần người dùng đã đăng nhập (ví dụ: organizer)
-    # plugins:
+    # plugins: # Ví dụ: Chỉ organizer được tạo event
     #   - name: jwt
     #     config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
   - name: event-get-by-id-route-v1
@@ -126,18 +142,32 @@ routes:
     strip_path: true
   - name: event-list-route-v1
     service: event-grpc-service
-    paths: ["/v1/events"]
+    paths: ["/v1/events"] # Có thể thêm query params cho filter status, organizer_id
     methods: [GET]
     strip_path: true
+  - name: event-publish-route-v1 # ROUTE MỚI
+    service: event-grpc-service
+    paths: ["/v1/events/{event_id}/publish"]
+    methods: [POST]
+    strip_path: true
+    # plugins: # Ví dụ: Chỉ organizer của event được publish
+    #   - name: jwt
+    #     config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
   # === Ticket & TicketType Service Routes ===
   # TicketTypeService Routes
   - name: tickettype-create-route-v1
-    service: ticket-grpc-service # Cùng trỏ đến ticket-service vì TicketTypeService được host chung
-    paths: ["/v1/events/{event_id}/ticket_types"]
+    service: ticket-grpc-service # Cùng trỏ đến ticket-service
+    paths: ["/v1/events/{event_id}/sessions/{session_id}/ticket_types"] # Path đã được cập nhật
     methods: [POST]
     strip_path: true
-    # Thêm plugin jwt nếu cần (ví dụ: chỉ organizer của event mới được tạo loại vé)
+    # plugins: # Ví dụ: Chỉ organizer của event được tạo loại vé
+  - name: tickettype-update-route-v1 # ROUTE MỚI
+    service: ticket-grpc-service
+    paths: ["/v1/ticket_types/{ticket_type_id}"]
+    methods: [PUT] # Hoặc PATCH tùy theo logic update của bạn
+    strip_path: true
+    # plugins:
   - name: tickettype-get-by-id-route-v1
     service: ticket-grpc-service
     paths: ["/v1/ticket_types/{ticket_type_id}"]
@@ -148,26 +178,31 @@ routes:
     paths: ["/v1/events/{event_id}/ticket_types"]
     methods: [GET]
     strip_path: true
+  - name: tickettype-list-by-session-route-v1 # ROUTE MỚI
+    service: ticket-grpc-service
+    paths: ["/v1/events/{event_id}/sessions/{session_id}/ticket_types"]
+    methods: [GET]
+    strip_path: true
   
   # TicketService Routes
-  - name: ticket-prepare-purchase-route-v1
+  - name: ticket-initiate-purchase-route-v1 # Đã đổi tên từ prepare_purchase
     service: ticket-grpc-service
-    paths: ["/v1/tickets/prepare_purchase"]
+    paths: ["/v1/tickets/initiate_purchase"] # Path đã được cập nhật
     methods: [POST]
     strip_path: true
-    # Thêm plugin jwt nếu cần (user phải đăng nhập để chuẩn bị mua vé)
-  - name: ticket-confirm-purchase-route-v1
+    # plugins: # Ví dụ: User phải đăng nhập
+  - name: ticket-confirm-payment-mint-route-v1 # Đã đổi tên từ confirm_purchase
     service: ticket-grpc-service
-    paths: ["/v1/tickets/confirm_purchase"]
+    paths: ["/v1/tickets/confirm_payment_mint"] # Path đã được cập nhật
     methods: [POST]
     strip_path: true
-    # Thêm plugin jwt 
+    # plugins:
   - name: ticket-get-by-id-route-v1
     service: ticket-grpc-service
     paths: ["/v1/tickets/{ticket_id}"]
     methods: [GET]
     strip_path: true
-    # Thêm plugin jwt
+    # plugins:
   - name: ticket-list-by-event-route-v1
     service: ticket-grpc-service
     paths: ["/v1/events/{event_id}/tickets"]
@@ -178,4 +213,4 @@ routes:
     paths: ["/v1/users/{owner_address}/tickets"]
     methods: [GET]
     strip_path: true
-    # Thêm plugin jwt
+    # plugins:

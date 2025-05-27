@@ -3,160 +3,119 @@ syntax = "proto3";
 package ticket;
 
 import "google/api/annotations.proto";
-// import "google/protobuf/timestamp.proto"; // Nếu bạn dùng cho created_at/updated_at sau này
-// import "google/protobuf/wrappers.proto"; // Nếu dùng cho các trường tùy chọn trong Update
-
-option java_multiple_files = true;
-// option go_package = "github.com/yourusername/yourproject/ticket";
 
 // ----- Models -----
 message Ticket {
   string id = 1;
   string event_id = 2;
   string ticket_type_id = 3;
-  string token_id = 4;        // uint256, dạng string
-  string owner_address = 5;
-  string session_id = 6;
-  string status = 7;
-  string token_uri_cid = 8;
-  string transaction_hash = 9;
-  int64 created_at = 10;       // Unix timestamp (seconds)
+  string token_id = 4;        // uint256, dạng string (ID của NFT)
+  string owner_address = 5;   // Địa chỉ ví của người mua
+  string session_id = 6;      // ID của session liên quan
+  string status = 7;          // Ví dụ: PENDING_PAYMENT, PAID, MINTING, MINTED, FAILED_MINT
+  string token_uri_cid = 8;   // CID của metadata JSON (chỉ hash, không có ipfs://)
+  string transaction_hash = 9; // Hash của giao dịch mint
+  int64 created_at = 10;
 }
 
 message TicketType {
   string id = 1;
   string event_id = 2;
-  string session_id = 3;          // ID của session mà loại vé này thuộc về
-  string blockchain_event_id = 4; // ID của Event trên Blockchain (uint256, dạng string) - Sẽ được cập nhật sau
+  string session_id = 3;
+  string blockchain_event_id = 4; // ID của Event cha trên Blockchain (uint256, string)
   string name = 5;
   int32 total_quantity = 6;
   int32 available_quantity = 7;
   string price_wei = 8;
-  int64 created_at = 9;           // Unix timestamp (seconds)
-  int64 updated_at = 10;          // Unix timestamp (seconds)
+  int64 created_at = 9;
+  int64 updated_at = 10;
 }
 
 // ----- TicketService -----
 service TicketService {
-  rpc PreparePurchaseTicket(PreparePurchaseTicketRequest) returns (PreparePurchaseTicketResponse) {
+  // Bước 1: Client yêu cầu tạo một "đơn hàng" vé (off-chain)
+  // Service sẽ kiểm tra thông tin, tạo metadata, lưu vé với trạng thái PENDING_PAYMENT
+  // và trả về thông tin thanh toán (địa chỉ contract, số tiền) cho client.
+  rpc InitiatePurchase(InitiatePurchaseRequest) returns (InitiatePurchaseResponse) {
     option (google.api.http) = {
-      post: "/v1/tickets/prepare_purchase"
+      post: "/v1/tickets/initiate_purchase"
       body: "*"
     };
   }
-  rpc ConfirmPurchaseAndMintTicket(ConfirmPurchaseAndMintTicketRequest) returns (ConfirmPurchaseAndMintTicketResponse) {
+
+  // Bước 2: Client gửi thông báo đã thanh toán (ví dụ: hash giao dịch off-chain, hoặc chỉ là xác nhận)
+  // Service xác minh thanh toán (nếu cần), sau đó gọi BlockchainService để mint vé.
+  // Nếu mint thành công, cập nhật trạng thái vé.
+  rpc ConfirmPaymentAndRequestMint(ConfirmPaymentAndRequestMintRequest) returns (ConfirmPaymentAndRequestMintResponse) {
     option (google.api.http) = {
-      post: "/v1/tickets/confirm_purchase"
+      post: "/v1/tickets/confirm_payment_mint" // Đổi tên để rõ hơn là backend mint
       body: "*"
     };
   }
+
   rpc GetTicket(GetTicketRequest) returns (Ticket);
   rpc ListTicketsByEvent(ListTicketsByEventRequest) returns (ListTicketsResponse);
   rpc ListTicketsByOwner(ListTicketsByOwnerRequest) returns (ListTicketsResponse);
 }
 
 // ----- TicketTypeService -----
+// (Giữ nguyên như bạn đã cung cấp trước đó, với CreateTicketType, UpdateTicketType, GetTicketType, ListTicketTypesByEvent, ListTicketTypesBySession)
 service TicketTypeService {
   rpc CreateTicketType(CreateTicketTypeRequest) returns (TicketType) {
     option (google.api.http) = {
-      post: "/v1/events/{event_id}/sessions/{session_id}/ticket_types" // Path rõ ràng hơn
+      post: "/v1/events/{event_id}/sessions/{session_id}/ticket_types"
       body: "*"
     };
   }
   rpc UpdateTicketType(UpdateTicketTypeRequest) returns (TicketType) {
     option (google.api.http) = {
-      put: "/v1/ticket_types/{ticket_type_id}" // Hoặc PATCH nếu chỉ cập nhật một phần
-      body: "*" // Body sẽ chứa các trường cần cập nhật
+      put: "/v1/ticket_types/{ticket_type_id}"
+      body: "*"
     };
   }
   rpc GetTicketType(GetTicketTypeRequest) returns (TicketType);
-  rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse); // Giữ nguyên để lấy all ticket types của event
-  rpc ListTicketTypesBySession(ListTicketTypesBySessionRequest) returns (ListTicketTypesResponse) { // RPC mới hữu ích
-     option (google.api.http) = {
-      get: "/v1/events/{event_id}/sessions/{session_id}/ticket_types"
-    };
-  }
+  rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse);
+  rpc ListTicketTypesBySession(ListTicketTypesBySessionRequest) returns (ListTicketTypesResponse);
 }
 
-// ----- Messages cho TicketService -----
-message PreparePurchaseTicketRequest {
+
+// ----- Messages cho luồng Backend Mint -----
+message InitiatePurchaseRequest {
   string ticket_type_id = 1;
-  // string session_id = 2; // session_id đã có trong TicketType, không cần ở đây nếu ticket_type_id đã đủ
-  string buyer_address = 3;
+  string buyer_address = 2; // Địa chỉ ví của người sẽ nhận NFT
+  // session_id có thể lấy từ ticket_type_id
 }
 
-message PreparePurchaseTicketResponse {
-  string payment_contract_address = 1;
-  string price_wei = 2;
-  string blockchain_event_id = 3;     // uint256, dạng string (của Event cha)
-  string session_id_for_contract = 4; // uint256, dạng string (của Session mà TicketType này thuộc về)
-  string token_uri_cid = 5;
+message InitiatePurchaseResponse {
+  string ticket_order_id = 1;        // ID của đơn hàng vé (ví dụ: _id của Ticket vừa tạo với status PENDING_PAYMENT)
+  string payment_contract_address = 2; // Địa chỉ contract EventTicketNFT (để user xem, nhưng không tự gọi buyTickets)
+  string price_to_pay_wei = 3;         // Số tiền cần thanh toán
+  string blockchain_event_id = 4;      // ID sự kiện trên blockchain
+  string session_id_for_contract = 5;  // Session ID cho contract
+  // Không cần trả về token_uri_cid cho client ở bước này nếu backend mint
+  // Client chỉ cần biết cần thanh toán bao nhiêu và vào đâu (nếu thanh toán on-chain cho 1 contract khác)
+  // Hoặc thông tin để thanh toán off-chain.
 }
 
-message ConfirmPurchaseAndMintTicketRequest {
-  string transaction_hash = 1;
-  string ticket_type_id = 2;
-  // string session_id = 3; // Có thể lấy từ TicketType
-  string owner_address = 4;
+message ConfirmPaymentAndRequestMintRequest {
+  string ticket_order_id = 1;  // ID của đơn hàng vé từ InitiatePurchaseResponse
+  string payment_transaction_hash = 2; // Hash của giao dịch thanh toán (nếu có, ví dụ off-chain hoặc on-chain vào ví owner)
+                                       // Hoặc một tham chiếu đến bằng chứng thanh toán.
+  // owner_address đã có khi InitiatePurchase
 }
 
-message ConfirmPurchaseAndMintTicketResponse {
-  Ticket ticket = 1;
+message ConfirmPaymentAndRequestMintResponse {
+  Ticket ticket = 1; // Trả về thông tin vé đã được cập nhật (ví dụ: status MINTING hoặc MINTED)
 }
 
-message GetTicketRequest {
-  string ticket_id = 1;
-}
+message GetTicketRequest { string ticket_id = 1; }
+message ListTicketsByEventRequest { string event_id = 1; int32 page_size = 2; string page_token = 3; }
+message ListTicketsByOwnerRequest { string owner_address = 1; int32 page_size = 2; string page_token = 3; }
+message ListTicketsResponse { repeated Ticket tickets = 1; string next_page_token = 2; }
 
-message ListTicketsByEventRequest { // Vẫn giữ để lấy tất cả vé của một sự kiện (qua nhiều session)
-  string event_id = 1;
-  int32 page_size = 2;
-  string page_token = 3;
-}
-
-message ListTicketsByOwnerRequest {
-  string owner_address = 1;
-  int32 page_size = 2;
-  string page_token = 3;
-}
-
-message ListTicketsResponse {
-  repeated Ticket tickets = 1;
-  string next_page_token = 2;
-}
-
-// ----- Messages cho TicketTypeService -----
-message CreateTicketTypeRequest {
-  string event_id = 1;   // ID của Event trong MongoDB
-  string session_id = 2; // ID của Session trong Event mà loại vé này thuộc về
-  string name = 3;
-  int32 total_quantity = 4;
-  string price_wei = 5;
-  // blockchain_event_id sẽ được cập nhật sau bởi UpdateTicketType
-}
-
-message UpdateTicketTypeRequest {
-  string ticket_type_id = 1;         // ID của TicketType cần cập nhật
-  string blockchain_event_id = 2;    // (Bắt buộc) ID của Event cha trên blockchain (sau khi Event được publish)
-  // Các trường tùy chọn khác nếu bạn muốn cho phép cập nhật (dùng google.protobuf.StringValue, etc. nếu cần phân biệt rỗng và không set)
-  // string name = 3;
-  // int32 total_quantity = 4;
-  // string price_wei = 5;
-}
-
-
-message GetTicketTypeRequest {
-  string ticket_type_id = 1;
-}
-
-message ListTicketTypesByEventRequest { // Vẫn giữ để lấy tất cả loại vé của một sự kiện
-  string event_id = 1;
-}
-message ListTicketTypesBySessionRequest { // RPC mới
-  string event_id = 1; // Để đảm bảo session thuộc đúng event
-  string session_id = 2;
-}
-
-message ListTicketTypesResponse {
-  repeated TicketType ticket_types = 1;
-}
+message CreateTicketTypeRequest { string event_id = 1; string session_id = 2; string name = 3; int32 total_quantity = 4; string price_wei = 5;}
+message UpdateTicketTypeRequest { string ticket_type_id = 1; string blockchain_event_id = 2;}
+message GetTicketTypeRequest { string ticket_type_id = 1; }
+message ListTicketTypesByEventRequest { string event_id = 1; }
+message ListTicketTypesBySessionRequest { string event_id = 1; string session_id = 2; }
+message ListTicketTypesResponse { repeated TicketType ticket_types = 1; }
