@@ -246,7 +246,7 @@ async function ListTicketTypesBySession (call, callback) {
 module.exports = {
   CreateTicketType,
   UpdateTicketType, // Thêm handler mới
-  GetTicketType,
-  ListTicketTypesByEvent,
-  ListTicketTypesBySession // Thêm handler mới
+  // GetTicketType,
+  ListTicketTypesByEvent
+  // ListTicketTypesBySession // Thêm handler mới
 }

@@ -4,7 +4,7 @@ package ticket;
 
 import "google/api/annotations.proto";
 
-// ----- Models -----
+// _____ Models _____
 message Ticket {
   string id = 1;
   string event_id = 2;
@@ -31,7 +31,7 @@ message TicketType {
   int64 updated_at = 10;
 }
 
-// ----- Request/Response Messages -----
+// _____ Request/Response Messages _____
 message CreateTicketTypeRequest { 
   string event_id = 1; 
   string session_id = 2; 
@@ -105,53 +105,53 @@ message ListTicketsResponse {
   string next_page_token = 2; 
 }
 
-// ----- TicketTypeService - PATHS KHÁC NHAU ĐỂ TRÁNH CONFLICT -----
+// _____ TicketTypeService _ PATHS KHÁC NHAU ĐỂ TRÁNH CONFLICT _____
 service TicketTypeService {
   rpc CreateTicketType(CreateTicketTypeRequest) returns (TicketType) {
     option (google.api.http) = {
-      post: "/v1/ticket-types/create"  // THAY ĐỔI PATH
+      post: "/v1/ticket_types/create"  // THAY ĐỔI PATH
       body: "*"
     };
   }
   
   rpc UpdateTicketType(UpdateTicketTypeRequest) returns (TicketType) {
     option (google.api.http) = {
-      put: "/v1/ticket-types/{ticket_type_id}"
+      put: "/v1/ticket_types/{ticket_type_id}"
       body: "*"
     };
   }
   
-  rpc GetTicketType(GetTicketTypeRequest) returns (TicketType) {
-    option (google.api.http) = {
-      get: "/v1/ticket-types/{ticket_type_id}"
-    };
-  }
+  // rpc GetTicketType(GetTicketTypeRequest) returns (TicketType) {
+  //   option (google.api.http) = {
+  //     get: "/v1/ticket_types/{ticket_type_id}"
+  //   };
+  // }
   
   rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse) {
     option (google.api.http) = {
-      get: "/v1/ticket-types/by-event/{event_id}"  // THAY ĐỔI PATH
+      get: "/v1/ticket_types/by_event/{event_id}"  // THAY ĐỔI PATH
     };
   }
   
   rpc ListTicketTypesBySession(ListTicketTypesBySessionRequest) returns (ListTicketTypesResponse) {
     option (google.api.http) = {
-      get: "/v1/ticket-types/by-session/{event_id}/{session_id}"  // THAY ĐỔI PATH
+      get: "/v1/ticket_types/by_session/{event_id}/{session_id}"  // THAY ĐỔI PATH
     };
   }
 }
 
-// ----- TicketService -----
+// _____ TicketService _____
 service TicketService {
   rpc InitiatePurchase(InitiatePurchaseRequest) returns (InitiatePurchaseResponse) {
     option (google.api.http) = {
-      post: "/v1/tickets/initiate-purchase"
+      post: "/v1/tickets/initiate_purchase"
       body: "*"
     };
   }
 
   rpc ConfirmPaymentAndRequestMint(ConfirmPaymentAndRequestMintRequest) returns (ConfirmPaymentAndRequestMintResponse) {
     option (google.api.http) = {
-      post: "/v1/tickets/confirm-payment-mint"
+      post: "/v1/tickets/confirm_payment_mint"
       body: "*"
     };
   }
@@ -164,13 +164,13 @@ service TicketService {
   
   rpc ListTicketsByEvent(ListTicketsByEventRequest) returns (ListTicketsResponse) {
     option (google.api.http) = {
-      get: "/v1/tickets/by-event/{event_id}"  // THAY ĐỔI PATH
+      get: "/v1/tickets/by_event/{event_id}"  // THAY ĐỔI PATH
     };
   }
   
   rpc ListTicketsByOwner(ListTicketsByOwnerRequest) returns (ListTicketsResponse) {
     option (google.api.http) = {
-      get: "/v1/tickets/by-owner/{owner_address}"  // THAY ĐỔI PATH
+      get: "/v1/tickets/by_owner/{owner_address}"  // THAY ĐỔI PATH
     };
   }
 }

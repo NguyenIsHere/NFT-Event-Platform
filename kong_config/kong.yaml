@@ -56,37 +56,35 @@ services:
           proto: /etc/kong/protos/ticket.proto
 
 # --- Routes ---
-# Kong routes với path structure mới (chỉ phần ticket-related)
-
 routes:
   # === TicketType Service Routes - PATH MỚI ===
   - name: tickettype-create-route-v1
     service: ticket-grpc-service
-    paths: ["/v1/ticket-types/create"]
+    paths: ["/v1/ticket_types/create"]
     methods: [POST]
     strip_path: false
 
   - name: tickettype-update-route-v1
     service: ticket-grpc-service
-    paths: ["/v1/ticket-types/{ticket_type_id}"]
+    paths: ["/v1/ticket_types/{ticket_type_id}"]
     methods: [PUT]
     strip_path: false
 
-  - name: tickettype-get-by-id-route-v1
-    service: ticket-grpc-service
-    paths: ["/v1/ticket-types/{ticket_type_id}"]
-    methods: [GET]
-    strip_path: false
+  # - name: tickettype-get-by-id-route-v1
+  #   service: ticket-grpc-service
+  #   paths: ["/v1/ticket_types/{ticket_type_id}"]
+  #   methods: [GET]
+  #   strip_path: false
 
   - name: tickettype-list-by-event-route-v1
     service: ticket-grpc-service
-    paths: ["/v1/ticket-types/by-event/{event_id}"]
+    paths: ["/v1/ticket_types/by_event/{event_id}"]
     methods: [GET]
     strip_path: false
 
   - name: tickettype-list-by-session-route-v1
     service: ticket-grpc-service
-    paths: ["/v1/ticket-types/by-session/{event_id}/{session_id}"]
+    paths: ["/v1/ticket_types/by_session/{event_id}/{session_id}"]
     methods: [GET]
     strip_path: false
   
@@ -99,7 +97,7 @@ routes:
 
   - name: ticket-confirm-payment-mint-route-v1
     service: ticket-grpc-service
-    paths: ["/v1/tickets/confirm-payment-mint"]
+    paths: ["/v1/tickets/confirm_payment_mint"]
     methods: [POST]
     strip_path: false
 
