@@ -1,18 +1,13 @@
 FROM node:20-alpine AS base
-
 ENV NODE_ENV=production
-
 WORKDIR /usr/src/app
 
-COPY package*.json ./
-
-# Cài đặt chỉ dependencies cho production
-# Ưu tiên dùng npm ci nếu có package-lock.json
+COPY services/04-event-service/package*.json ./
 RUN npm ci --omit=dev
 
-COPY . .
+COPY services/04-event-service/src ./src
+COPY services/04-event-service/.env ./.env
+COPY protos /usr/src/app/protos 
 
-COPY ../../protos /usr/src/app/protos
-
-EXPOSE 50054
+EXPOSE ${PORT:-50054}
 CMD [ "node", "src/server.js" ]

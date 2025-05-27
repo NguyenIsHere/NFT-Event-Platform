@@ -5,124 +5,90 @@ package ticket;
 import "google/api/annotations.proto";
 // import "google/protobuf/timestamp.proto";
 
-// ----- Models (giữ nguyên từ của bạn, chỉ điều chỉnh kiểu dữ liệu nếu cần) -----
+// ----- Models -----
 message Ticket {
-  string id = 1;             // MongoDB ObjectId
-  string event_id = 2;       // ID của Event (từ event-service)
-  string ticket_type_id = 3;
-  uint64 token_id = 4;       // ID của NFT trên blockchain (uint64 vì nextTokenId là uint256)
-  string owner_address = 5;  // Địa chỉ ví sở hữu vé NFT
-  string session_id = 6;     // ID của session trong Event
-  int64 created_at = 7;      // Unix timestamp
-  // string qr_code_data = 8; // Có thể tạo ở client hoặc service riêng
+  string id = 1;              // MongoDB ObjectId
+  string event_id = 2;        // ID của Event (từ event-service)
+  string ticket_type_id = 3;  // ID của TicketType
+  string token_id = 4;        // ID của NFT trên blockchain (uint256, lưu dạng string)
+  string owner_address = 5;   // Địa chỉ ví sở hữu vé NFT
+  string session_id = 6;      // ID của session trong Event
+  string status = 7;          // Trạng thái vé: AVAILABLE, SOLD, USED, PENDING_MINT etc.
+  string token_uri_cid = 8;   // CID của metadata JSON cho vé này
+  string transaction_hash = 9; // Hash của giao dịch mint vé
+  int64 created_at = 10;       // Unix timestamp
+  // string qr_code_data = 11;
 }
 
 message TicketType {
-  string id = 1;                // MongoDB ObjectId
-  string event_id = 2;          // ID của Event (từ event-service)
-  uint64 blockchain_event_id = 3; // ID của Event trên Blockchain (để contract biết mint vé cho event nào)
-  string name = 4;              // Tên loại vé (ví dụ: "Vé Thường", "Vé VIP")
+  string id = 1;                  // MongoDB ObjectId
+  string event_id = 2;            // ID của Event (từ event-service)
+  string blockchain_event_id = 3; // ID của Event trên Blockchain (uint256, lưu dạng string)
+  string name = 4;                // Tên loại vé
   int32 total_quantity = 5;
   int32 available_quantity = 6;
-  string price_wei = 7;         // Giá vé dưới dạng chuỗi số nguyên lớn (Wei)
+  string price_wei = 7;           // Giá vé dưới dạng chuỗi số nguyên lớn (Wei)
   int64 created_at = 8;
   int64 updated_at = 9;
 }
 
 // ----- TicketService -----
 service TicketService {
-  // User mua vé (Frontend sẽ gọi API này)
-  // Service này sẽ lấy thông tin giá, địa chỉ contract từ BlockchainService,
-  // sau đó trả về cho frontend để user ký giao dịch qua Metamask.
   rpc PreparePurchaseTicket(PreparePurchaseTicketRequest) returns (PreparePurchaseTicketResponse) {
     option (google.api.http) = {
       post: "/v1/tickets/prepare_purchase"
       body: "*"
     };
   }
-
-  // Sau khi user thanh toán trên Metamask và có transaction hash,
-  // Frontend gọi API này để backend xác nhận giao dịch và mint vé.
   rpc ConfirmPurchaseAndMintTicket(ConfirmPurchaseAndMintTicketRequest) returns (ConfirmPurchaseAndMintTicketResponse) {
     option (google.api.http) = {
       post: "/v1/tickets/confirm_purchase"
       body: "*"
     };
   }
-
-  rpc GetTicket(GetTicketRequest) returns (Ticket) {
-    option (google.api.http) = {
-      get: "/v1/tickets/{ticket_id}"
-    };
-  }
-
-  rpc ListTicketsByEvent(ListTicketsByEventRequest) returns (ListTicketsResponse) {
-    option (google.api.http) = {
-      get: "/v1/events/{event_id}/tickets"
-    };
-  }
-  
-  rpc ListTicketsByOwner(ListTicketsByOwnerRequest) returns (ListTicketsResponse) {
-    option (google.api.http) = {
-      get: "/v1/users/{owner_address}/tickets"
-    };
-  }
-  // TransferTicket có thể phức tạp, liên quan đến cả on-chain và off-chain update
-  // rpc TransferTicket(TransferTicketRequest) returns (TransferTicketResponse);
+  rpc GetTicket(GetTicketRequest) returns (Ticket); // Trả về message Ticket
+  rpc ListTicketsByEvent(ListTicketsByEventRequest) returns (ListTicketsResponse);
+  rpc ListTicketsByOwner(ListTicketsByOwnerRequest) returns (ListTicketsResponse);
 }
 
 // ----- TicketTypeService -----
 service TicketTypeService {
-  rpc CreateTicketType(CreateTicketTypeRequest) returns (TicketType) {
-     option (google.api.http) = {
-      post: "/v1/events/{event_id}/ticket_types" // Tạo loại vé cho một event cụ thể
-      body: "*"
-    };
-  }
-  rpc GetTicketType(GetTicketTypeRequest) returns (TicketType) {
-    option (google.api.http) = {
-      get: "/v1/ticket_types/{ticket_type_id}"
-    };
-  }
-  rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse) {
-    option (google.api.http) = {
-      get: "/v1/events/{event_id}/ticket_types"
-    };
-  }
-  // Update, Delete TicketType nếu cần
+  rpc CreateTicketType(CreateTicketTypeRequest) returns (TicketType); // Trả về message TicketType
+  rpc GetTicketType(GetTicketTypeRequest) returns (TicketType);
+  rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse);
 }
 
 // ----- Messages cho TicketService -----
 message PreparePurchaseTicketRequest {
   string ticket_type_id = 1;
-  string session_id = 2;     // Tùy chọn, nếu sự kiện có nhiều session
-  // string user_id = 3; // User ID từ hệ thống của bạn, để biết ai đang mua
+  string session_id = 2;     // Tùy chọn
+  string buyer_address = 3;  // Địa chỉ ví của người mua tiềm năng (để kiểm tra điều kiện nếu cần)
 }
 
 message PreparePurchaseTicketResponse {
-  string payment_contract_address = 1; // Địa chỉ smart contract EventTicketNFT
-  string price_wei = 2;                // Giá vé bằng Wei (lấy từ TicketType)
-  uint64 blockchain_event_id = 3;      // ID sự kiện trên blockchain (để hàm buyTickets của contract biết)
-  string session_id_for_contract = 4;  // Session ID để truyền cho contract (nếu cần, có thể là uint64)
-  string token_uri_cid = 5;            // CID của metadata JSON cho vé này (ticket-service sẽ tạo và upload qua ipfs-service)
-  // Thêm chain_id nếu cần
+  string payment_contract_address = 1;
+  string price_wei = 2;
+  string blockchain_event_id = 3;     // uint256, dạng string
+  string session_id_for_contract = 4; // uint256, dạng string (session ID sẽ được dùng trên contract)
+  string token_uri_cid = 5;           // CID của metadata JSON cho vé này
 }
 
 message ConfirmPurchaseAndMintTicketRequest {
-  string transaction_hash = 1; // Hash của giao dịch người dùng đã thực hiện trên Metamask
-  string ticket_type_id = 2;   // Để biết đang mint loại vé nào
-  string session_id = 3;       // Session nào (nếu có)
-  string owner_address = 4;    // Địa chỉ ví của người mua (lấy từ Metamask sau khi ký)
-  string token_uri_cid = 5;    // CID của metadata JSON (đã được trả về từ PreparePurchase)
-  uint64 blockchain_event_id = 6; // ID sự kiện trên blockchain
+  string transaction_hash = 1; // Hash của giao dịch người dùng đã thực hiện
+  string ticket_type_id = 2;
+  string session_id = 3;       // Session vé được mua
+  string owner_address = 4;    // Địa chỉ ví của người mua (đã thực hiện giao dịch)
+  // Thông tin này đã được trả về từ PreparePurchase và client dùng để gọi contract
+  // Không cần truyền lại token_uri_cid và blockchain_event_id ở đây nữa nếu luồng là user tự gọi contract.
+  // Tuy nhiên, nếu backend mint hộ thì cần. Giả định user tự gọi contract.
 }
 
 message ConfirmPurchaseAndMintTicketResponse {
-  Ticket ticket = 1; // Trả về thông tin vé đã được tạo và mint
+  Ticket ticket = 1;
 }
 
 message GetTicketRequest {
-  string ticket_id = 1; // ID của Ticket trong MongoDB
+  string ticket_id = 1;
 }
 
 message ListTicketsByEventRequest {
@@ -144,13 +110,12 @@ message ListTicketsResponse {
 
 // ----- Messages cho TicketTypeService -----
 message CreateTicketTypeRequest {
-  string event_id = 1;
-  uint64 blockchain_event_id = 2; // Lấy từ Event đã được đăng ký trên blockchain
+  string event_id = 1;              // ID của Event trong MongoDB
+  string blockchain_event_id = 2;   // ID của Event trên Blockchain (uint256 dạng string)
   string name = 3;
   int32 total_quantity = 4;
-  string price_wei = 5;         // Giá vé bằng Wei (dưới dạng chuỗi để xử lý số lớn)
+  string price_wei = 5;
 }
-// TicketType message được dùng làm response
 
 message GetTicketTypeRequest {
   string ticket_type_id = 1;
