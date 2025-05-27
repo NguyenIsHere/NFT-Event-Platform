@@ -29,4 +29,13 @@ const ticketServiceClient = new ticketProto.TicketService( // Sử dụng Ticket
   grpc.credentials.createInsecure()
 )
 
-module.exports = ticketServiceClient
+// Client cho TicketTypeService
+const ticketTypeServiceClient = new ticketProto.TicketTypeService(
+  TICKET_SERVICE_ADDRESS, // Cùng địa chỉ vì chúng được host chung bởi 05-ticket-service
+  grpc.credentials.createInsecure()
+)
+
+module.exports = {
+  ticketServiceClient, // Dùng để gọi các RPC của TicketService
+  ticketTypeServiceClient // Dùng để gọi các RPC của TicketTypeService
+}

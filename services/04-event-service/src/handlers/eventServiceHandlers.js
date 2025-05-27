@@ -4,7 +4,10 @@ const grpc = require('@grpc/grpc-js')
 const ipfsServiceClient = require('../clients/ipfsServiceClient')
 const blockchainServiceClient = require('../clients/blockchainServiceClient')
 const mongoose = require('mongoose')
-const ticketServiceClient = require('../clients/ticketServiceClient') // Sẽ cần để lấy thông tin TicketType
+const {
+  ticketServiceClient,
+  ticketTypeServiceClient
+} = require('../clients/ticketServiceClient')
 
 // Helper chuyển đổi Mongoose document sang gRPC message
 function eventToGrpcEvent (eventDoc) {
@@ -173,7 +176,7 @@ async function PublishEvent (call, callback) {
     // Logic để xác định default_price_wei_on_chain và total_supply_on_chain
     // có thể dựa vào thông tin từ request hoặc tổng hợp từ các TicketType.
     // Hiện tại, chúng ta sử dụng giá trị từ request.
-    // Bạn có thể thêm logic gọi ticketServiceClient.ListTicketTypesByEvent ở đây nếu cần.
+    // Bạn có thể thêm logic gọi ticketTypeServiceClient.ListTicketTypesByEvent ở đây nếu cần.
 
     console.log(
       `EventService: Attempting to register event ${eventToPublish.id} on blockchain...`
@@ -212,7 +215,7 @@ async function PublishEvent (call, callback) {
       )
       try {
         const listTicketTypesResponse = await new Promise((resolve, reject) => {
-          ticketServiceClient.ListTicketTypesByEvent(
+          ticketTypeServiceClient.ListTicketTypesByEvent(
             { event_id: publishedEvent.id.toString() },
             { deadline: new Date(Date.now() + 5000) },
             (err, response) => {
@@ -229,7 +232,7 @@ async function PublishEvent (call, callback) {
                 `EventService: Calling UpdateTicketType for TicketType ID: ${tt.id} to set blockchain_event_id: ${publishedEvent.blockchainEventId}`
               )
               return new Promise((resolve, reject) => {
-                ticketServiceClient.UpdateTicketType(
+                ticketTypeServiceClient.UpdateTicketType(
                   {
                     ticket_type_id: tt.id,
                     blockchain_event_id: publishedEvent.blockchainEventId // Chỉ cập nhật trường này
