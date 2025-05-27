@@ -1,94 +1,165 @@
 syntax = "proto3";
 
 package ticket;
-option java_multiple_files = true;
 
-// ---------------- Models ----------------
+import "google/api/annotations.proto";
+// import "google/protobuf/timestamp.proto";
 
+// ----- Models (giữ nguyên từ của bạn, chỉ điều chỉnh kiểu dữ liệu nếu cần) -----
 message Ticket {
-  string id            = 1; // MongoDB ObjectId
-  string eventId       = 2;
-  string ticketTypeId  = 3;
-  int64  tokenId       = 4;
-  string ownerAddress  = 5;
-  string sessionId     = 6;
-  int64  createdAt     = 7;
-  string qrCodeData    = 8; 
+  string id = 1;             // MongoDB ObjectId
+  string event_id = 2;       // ID của Event (từ event-service)
+  string ticket_type_id = 3;
+  uint64 token_id = 4;       // ID của NFT trên blockchain (uint64 vì nextTokenId là uint256)
+  string owner_address = 5;  // Địa chỉ ví sở hữu vé NFT
+  string session_id = 6;     // ID của session trong Event
+  int64 created_at = 7;      // Unix timestamp
+  // string qr_code_data = 8; // Có thể tạo ở client hoặc service riêng
 }
 
 message TicketType {
-  string id                = 1;
-  string eventId           = 2;
-  string type              = 3;
-  int32  totalQuantity     = 4;
-  int32  availableQuantity = 5;
-  double price             = 6;
-  int64  createdAt         = 7;
-  int64  updatedAt         = 8;
+  string id = 1;                // MongoDB ObjectId
+  string event_id = 2;          // ID của Event (từ event-service)
+  uint64 blockchain_event_id = 3; // ID của Event trên Blockchain (để contract biết mint vé cho event nào)
+  string name = 4;              // Tên loại vé (ví dụ: "Vé Thường", "Vé VIP")
+  int32 total_quantity = 5;
+  int32 available_quantity = 6;
+  string price_wei = 7;         // Giá vé dưới dạng chuỗi số nguyên lớn (Wei)
+  int64 created_at = 8;
+  int64 updated_at = 9;
 }
 
-// ---------------- TicketService ----------------
-
+// ----- TicketService -----
 service TicketService {
-  rpc CreateTicket(CreateTicketRequest)       returns (CreateTicketResponse);
-  rpc GetTicket(GetTicketRequest)             returns (Ticket);
-  rpc ListTickets(ListTicketsRequest)         returns (ListTicketsResponse);
-  rpc DeleteTicket(DeleteTicketRequest)       returns (DeleteTicketResponse);
+  // User mua vé (Frontend sẽ gọi API này)
+  // Service này sẽ lấy thông tin giá, địa chỉ contract từ BlockchainService,
+  // sau đó trả về cho frontend để user ký giao dịch qua Metamask.
+  rpc PreparePurchaseTicket(PreparePurchaseTicketRequest) returns (PreparePurchaseTicketResponse) {
+    option (google.api.http) = {
+      post: "/v1/tickets/prepare_purchase"
+      body: "*"
+    };
+  }
 
-  rpc PurchaseTicket(PurchaseTicketRequest)   returns (PurchaseTicketResponse);
-  rpc ConfirmTicket(ConfirmTicketRequest)     returns (ConfirmTicketResponse);
-  rpc TransferTicket(TransferTicketRequest)   returns (TransferTicketResponse);
-  rpc ListTicketsByOwner(ListTicketsByOwnerRequest) returns (ListTicketsResponse);
-  rpc ConfirmByTx(ConfirmByTxRequest)         returns (ConfirmByTxResponse);
+  // Sau khi user thanh toán trên Metamask và có transaction hash,
+  // Frontend gọi API này để backend xác nhận giao dịch và mint vé.
+  rpc ConfirmPurchaseAndMintTicket(ConfirmPurchaseAndMintTicketRequest) returns (ConfirmPurchaseAndMintTicketResponse) {
+    option (google.api.http) = {
+      post: "/v1/tickets/confirm_purchase"
+      body: "*"
+    };
+  }
+
+  rpc GetTicket(GetTicketRequest) returns (Ticket) {
+    option (google.api.http) = {
+      get: "/v1/tickets/{ticket_id}"
+    };
+  }
+
+  rpc ListTicketsByEvent(ListTicketsByEventRequest) returns (ListTicketsResponse) {
+    option (google.api.http) = {
+      get: "/v1/events/{event_id}/tickets"
+    };
+  }
+  
+  rpc ListTicketsByOwner(ListTicketsByOwnerRequest) returns (ListTicketsResponse) {
+    option (google.api.http) = {
+      get: "/v1/users/{owner_address}/tickets"
+    };
+  }
+  // TransferTicket có thể phức tạp, liên quan đến cả on-chain và off-chain update
+  // rpc TransferTicket(TransferTicketRequest) returns (TransferTicketResponse);
 }
 
-// ---------------- TicketTypeService ----------------
-
+// ----- TicketTypeService -----
 service TicketTypeService {
-  rpc CreateTicketType(CreateTicketTypeRequest)   returns (CreateTicketTypeResponse);
-  rpc GetTicketType(GetTicketTypeRequest)         returns (TicketType);
-  rpc ListTicketTypes(ListTicketTypesRequest)     returns (ListTicketTypesResponse);
-  rpc UpdateTicketType(UpdateTicketTypeRequest)   returns (UpdateTicketTypeResponse);
-  rpc DeleteTicketType(DeleteTicketTypeRequest)   returns (DeleteTicketTypeResponse);
+  rpc CreateTicketType(CreateTicketTypeRequest) returns (TicketType) {
+     option (google.api.http) = {
+      post: "/v1/events/{event_id}/ticket_types" // Tạo loại vé cho một event cụ thể
+      body: "*"
+    };
+  }
+  rpc GetTicketType(GetTicketTypeRequest) returns (TicketType) {
+    option (google.api.http) = {
+      get: "/v1/ticket_types/{ticket_type_id}"
+    };
+  }
+  rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse) {
+    option (google.api.http) = {
+      get: "/v1/events/{event_id}/ticket_types"
+    };
+  }
+  // Update, Delete TicketType nếu cần
 }
 
-// -------------- Messages ---------------
-
-// Ticket CRUD
-message CreateTicketRequest   { string eventId = 1; string ticketTypeId = 2; string ownerAddress = 3; string sessionId = 4; }
-message CreateTicketResponse  { bool success = 1; string ticketId = 2; }
-message GetTicketRequest      { string ticketId = 1; }
-message ListTicketsRequest    { string eventId = 1; }
-message DeleteTicketRequest   { string ticketId = 1; }
-message DeleteTicketResponse  { bool success = 1; }
-message ListTicketsResponse   { repeated Ticket tickets = 1; }
-
-// Purchase / Confirm / Transfer
-message PurchaseTicketRequest  { string eventId = 1; string ticketTypeId = 2; string sessionId = 3; string ownerAddress = 4; }
-message PurchaseTicketResponse { bool success = 1; string paymentInfoJson = 2; }
-message ConfirmTicketRequest   {
-  string eventId      = 1;
-  string ticketTypeId = 2;
-  string sessionId    = 3;
-  int64  tokenId      = 4;
-  string ownerAddress = 5;
+// ----- Messages cho TicketService -----
+message PreparePurchaseTicketRequest {
+  string ticket_type_id = 1;
+  string session_id = 2;     // Tùy chọn, nếu sự kiện có nhiều session
+  // string user_id = 3; // User ID từ hệ thống của bạn, để biết ai đang mua
 }
-message ConfirmTicketResponse  { bool success = 1; }
-message TransferTicketRequest  { string ticketId = 1; string fromAddress = 2; string toAddress = 3; }
-message TransferTicketResponse { bool success = 1; }
 
-// List by owner
-message ListTicketsByOwnerRequest { string ownerAddress = 1; }
-message ConfirmByTxRequest         { string transactionHash = 1; }
-message ConfirmByTxResponse        { bool success         = 1; }
+message PreparePurchaseTicketResponse {
+  string payment_contract_address = 1; // Địa chỉ smart contract EventTicketNFT
+  string price_wei = 2;                // Giá vé bằng Wei (lấy từ TicketType)
+  uint64 blockchain_event_id = 3;      // ID sự kiện trên blockchain (để hàm buyTickets của contract biết)
+  string session_id_for_contract = 4;  // Session ID để truyền cho contract (nếu cần, có thể là uint64)
+  string token_uri_cid = 5;            // CID của metadata JSON cho vé này (ticket-service sẽ tạo và upload qua ipfs-service)
+  // Thêm chain_id nếu cần
+}
 
-// TicketType CRUD
-message CreateTicketTypeRequest   { string eventId = 1; string type = 2; int32 totalQuantity = 3; double price = 4; }
-message CreateTicketTypeResponse  { bool success = 1; string ticketTypeId = 2; }
-message GetTicketTypeRequest      { string ticketTypeId = 1; }
-message ListTicketTypesRequest    { string eventId = 1; }
-message UpdateTicketTypeRequest   { string ticketTypeId = 1; int32 availableQuantity = 2; }
-message UpdateTicketTypeResponse  { bool success = 1; }
-message DeleteTicketTypeRequest   { string ticketTypeId = 1; }
-message DeleteTicketTypeResponse  { bool success = 1; }
-message ListTicketTypesResponse   { repeated TicketType types = 1; }
+message ConfirmPurchaseAndMintTicketRequest {
+  string transaction_hash = 1; // Hash của giao dịch người dùng đã thực hiện trên Metamask
+  string ticket_type_id = 2;   // Để biết đang mint loại vé nào
+  string session_id = 3;       // Session nào (nếu có)
+  string owner_address = 4;    // Địa chỉ ví của người mua (lấy từ Metamask sau khi ký)
+  string token_uri_cid = 5;    // CID của metadata JSON (đã được trả về từ PreparePurchase)
+  uint64 blockchain_event_id = 6; // ID sự kiện trên blockchain
+}
+
+message ConfirmPurchaseAndMintTicketResponse {
+  Ticket ticket = 1; // Trả về thông tin vé đã được tạo và mint
+}
+
+message GetTicketRequest {
+  string ticket_id = 1; // ID của Ticket trong MongoDB
+}
+
+message ListTicketsByEventRequest {
+  string event_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListTicketsByOwnerRequest {
+  string owner_address = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListTicketsResponse {
+  repeated Ticket tickets = 1;
+  string next_page_token = 2;
+}
+
+// ----- Messages cho TicketTypeService -----
+message CreateTicketTypeRequest {
+  string event_id = 1;
+  uint64 blockchain_event_id = 2; // Lấy từ Event đã được đăng ký trên blockchain
+  string name = 3;
+  int32 total_quantity = 4;
+  string price_wei = 5;         // Giá vé bằng Wei (dưới dạng chuỗi để xử lý số lớn)
+}
+// TicketType message được dùng làm response
+
+message GetTicketTypeRequest {
+  string ticket_type_id = 1;
+}
+
+message ListTicketTypesByEventRequest {
+  string event_id = 1;
+}
+
+message ListTicketTypesResponse {
+  repeated TicketType ticket_types = 1;
+}

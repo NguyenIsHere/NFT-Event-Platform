@@ -2,14 +2,52 @@ syntax = "proto3";
 
 package event;
 
-option java_multiple_files = true;
+import "google/api/annotations.proto";
+// import "google/protobuf/timestamp.proto"; // Cân nhắc dùng nếu muốn kiểu Timestamp chuẩn
 
+// ----- EventService -----
 service EventService {
-  rpc CreateEvent(CreateEventRequest) returns (CreateEventResponse);
-  rpc GetEventById(GetEventRequest) returns (GetEventResponse);
-  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
-  rpc UpdateEvent(UpdateEventRequest) returns (UpdateEventResponse);
-  rpc DeleteEvent(DeleteEventRequest) returns (DeleteEventResponse);
+  rpc CreateEvent(CreateEventRequest) returns (EventResponse) {
+    option (google.api.http) = {
+      post: "/v1/events"
+      body: "*"
+    };
+  }
+  rpc GetEvent(GetEventRequest) returns (EventResponse) {
+    option (google.api.http) = {
+      get: "/v1/events/{event_id}"
+    };
+  }
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse) {
+    option (google.api.http) = {
+      get: "/v1/events"
+    };
+  }
+  // Thêm UpdateEvent, DeleteEvent nếu cần
+}
+
+// ----- Messages -----
+message Event {
+  string id = 1;                // MongoDB ObjectId (string)
+  string organizer_id = 2;
+  string name = 3;
+  string description = 4;
+  string location = 5;
+  string banner_url_cid = 6;    // CID của ảnh banner trên IPFS
+  repeated Session sessions = 7;
+  bool seat_map_enabled = 8;
+  // repeated string seat_map_ids = 9; // Có thể quản lý ở service khác
+  bool is_active = 10;          // Sự kiện có đang mở bán không
+  string created_at = 11;       // String ISO 8601 date, hoặc dùng google.protobuf.Timestamp
+  string updated_at = 12;       // String ISO 8601 date
+  uint64 blockchain_event_id = 13; // ID của sự kiện này trên Blockchain (nếu có)
+}
+
+message Session {
+  string id = 1;              // ID của session (có thể là UUID hoặc ObjectId string)
+  string name = 2;            // Tên session (ví dụ: "Ngày 1 - Sáng", "Suất chiếu 19:00")
+  int64 start_time = 3;       // Unix timestamp (seconds or milliseconds)
+  int64 end_time = 4;         // Unix timestamp
 }
 
 message CreateEventRequest {
@@ -17,71 +55,35 @@ message CreateEventRequest {
   string name = 2;
   string description = 3;
   string location = 4;
-  string banner_url = 5;
-  bool seat_map_enabled = 6;
-  repeated string seat_map_ids = 7;
-  repeated Session sessions = 8;
+  string banner_url_cid = 5;
+  repeated SessionInput sessions = 6;
+  bool seat_map_enabled = 7;
+  bool is_active = 8;
 }
 
-message CreateEventResponse {
-  string event_id = 1;
-  bool success = 2;
+message SessionInput { // Dùng cho input khi tạo/cập nhật event
+  string name = 1;
+  int64 start_time = 2;
+  int64 end_time = 3;
+}
+
+// Dùng chung Event message cho response
+message EventResponse {
+  Event event = 1;
 }
 
 message GetEventRequest {
-  string event_id = 1;
-}
-
-message GetEventResponse {
-  string event_id = 1;
-  string organizer_id = 2;
-  string name = 3;
-  string description = 4;
-  string location = 5;
-  string banner_url = 6;
-  bool seat_map_enabled = 7;
-  repeated string seat_map_ids = 8;
-  repeated Session sessions = 9;
-  bool is_active = 10;
-  int64 created_at = 11;
-  int64 updated_at = 12;
+  string event_id = 1; // ID của Event trong MongoDB
 }
 
 message ListEventsRequest {
-  string organizer_id = 1; // Thêm để lọc theo organizer
+  string organizer_id = 1; // Lọc event theo organizer (tùy chọn)
+  // Thêm các trường filter khác nếu cần (ví dụ: status, date range)
+  int32 page_size = 2;
+  string page_token = 3; // Cho pagination
 }
 
 message ListEventsResponse {
-  repeated GetEventResponse events = 1;
-}
-
-message UpdateEventRequest {
-  string event_id = 1;
-  string organizer_id = 2; 
-  string name = 3;
-  string description = 4;
-  string location = 5;
-  string banner_url = 6;
-  bool seat_map_enabled = 7;
-  repeated string seat_map_ids = 8;
-  repeated Session sessions = 9;
-  bool is_active = 10;
-}
-
-message UpdateEventResponse {
-  bool success = 1;
-}
-
-message DeleteEventRequest {
-  string event_id = 1;
-}
-
-message DeleteEventResponse {
-  bool success = 1;
-}
-
-message Session {
-  string id = 1;
-  int64 start_time = 2;
-  int64 end_time = 3;
+  repeated Event events = 1;
+  string next_page_token = 2;
 }

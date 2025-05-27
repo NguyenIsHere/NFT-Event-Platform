@@ -14,5 +14,5 @@ COPY . .
 
 COPY ../../protos /usr/src/app/protos
 
-EXPOSE 50054
+EXPOSE 50055
 CMD [ "node", "src/server.js" ]

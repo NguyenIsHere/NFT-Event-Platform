@@ -1,75 +1,84 @@
 syntax = "proto3";
+
 package blockchain;
-option java_multiple_files = true;
 
+import "google/api/annotations.proto";
+
+// ----- BlockchainService -----
 service BlockchainService {
-  // Event management
-  rpc CreateEvent       (CreateEventRequest)     returns (CreateEventResponse);
-  rpc BatchMint         (BatchMintRequest)       returns (BatchMintResponse);
+  // Được gọi bởi EventService khi tạo sự kiện mới trong hệ thống
+  rpc RegisterEventOnBlockchain(RegisterEventOnBlockchainRequest) returns (RegisterEventOnBlockchainResponse) {
+    // Endpoint này có thể không cần expose qua Kong nếu chỉ gọi nội bộ
+  }
 
-  // Front-end payment flow
-  rpc GetPaymentInfo    (GetPaymentInfoRequest)  returns (GetPaymentInfoResponse);
-  rpc VerifyPayment     (VerifyPaymentRequest)   returns (VerifyPaymentResponse);
+  // Được gọi bởi TicketService để lấy thông tin cần thiết cho việc thanh toán
+  rpc GetTicketPaymentDetails(GetTicketPaymentDetailsRequest) returns (GetTicketPaymentDetailsResponse) {
+    // Không cần expose qua Kong nếu chỉ gọi nội bộ
+  }
 
-  // NFT transfer
-  rpc TransferTicket    (TransferTicketRequest)  returns (TransferTicketResponse);
-}
+  // Được gọi bởi TicketService (hoặc một quy trình backend khác) để mint vé NFT
+  // sau khi các điều kiện (ví dụ: thanh toán) đã được xác nhận.
+  rpc MintTicket(MintTicketRequest) returns (MintTicketResponse) {
+    // Không cần expose qua Kong nếu chỉ gọi nội bộ
+  }
 
-// --- CreateEvent ---
-message CreateEventRequest {
-  uint64 eventId     = 1;
-  uint64 priceWei    = 2;
-  uint64 totalSupply = 3;
-}
-message CreateEventResponse {
-  bool   success = 1;
-  string txHash  = 2;
+  // (Tùy chọn) Xác minh một giao dịch chung
+  rpc VerifyTransaction(VerifyTransactionRequest) returns (VerifyTransactionResponse);
 }
 
-// --- BatchMint ---
-message BatchMintRequest {
-  string         to         = 1;
-  repeated string tokenUris = 2;
-  repeated uint64 eventIds  = 3;
-  repeated uint64 sessionIds= 4;
-  repeated uint64 prices    = 5;
-}
-message BatchMintResponse {
-  bool   success = 1;
-  string txHash  = 2;
+// ----- Messages -----
+message RegisterEventOnBlockchainRequest {
+  string system_event_id_for_ref = 1; // ID của sự kiện trong event-service (MongoDB ObjectId dạng string)
+  string blockchain_event_id = 2;     // ID (uint256) bạn muốn dùng cho sự kiện trên contract (dạng string)
+  string price_wei = 3;               // Giá vé mặc định (dưới dạng chuỗi Wei)
+  string total_supply = 4;            // Tổng số vé (uint256, dạng string)
 }
 
-// --- Payment info for MetaMask ---
-message GetPaymentInfoRequest {
-  string eventId      = 1;
-  string ticketTypeId = 2;
-  string sessionId    = 3;
-}
-message GetPaymentInfoResponse {
-  string contractAddress = 1;
-  string abiJson         = 2;
-  string priceWei        = 3;
-  int32  chainId         = 4;
+message RegisterEventOnBlockchainResponse {
+  bool success = 1;
+  string transaction_hash = 2;
+  string actual_blockchain_event_id = 3; // ID sự kiện thực tế trên blockchain (uint256, dạng string)
 }
 
-// --- Verify on‐chain mint tx & extract data ---
-message VerifyPaymentRequest {
-  string txHash = 1;
-}
-message VerifyPaymentResponse {
-  bool   success      = 1;
-  string eventId      = 2;
-  string sessionId    = 3;
-  string tokenId      = 4;
-  string ownerAddress = 5;
+message GetTicketPaymentDetailsRequest {
+  string blockchain_event_id = 1; // ID của sự kiện trên contract (uint256, dạng string)
+  // string ticket_type_id = 2; // Hoặc ID loại vé để lấy giá đúng (tùy theo logic của bạn)
+  string price_wei_from_ticket_type = 3; // Giá vé từ TicketType (dạng chuỗi Wei)
+                                         // Blockchain service có thể tự query giá từ contract nếu cần
 }
 
-// --- TransferTicket ---
-message TransferTicketRequest {
-  string to      = 1;
-  uint64 tokenId = 2;
+message GetTicketPaymentDetailsResponse {
+  string payment_contract_address = 1; // Địa chỉ của EventTicketNFT contract
+  string price_to_pay_wei = 2;         // Số tiền Wei người dùng cần trả (lấy từ contract hoặc TicketType)
+  // uint32 chain_id = 3; // Chain ID, nếu cần cho frontend
 }
-message TransferTicketResponse {
-  bool   success = 1;
-  string txHash  = 2;
+
+message MintTicketRequest {
+  string buyer_address = 1;           // Địa chỉ ví của người mua
+  string token_uri_cid = 2;           // CID của metadata JSON của vé (ví dụ: "ipfs://CID...")
+  string blockchain_event_id = 3;     // ID của sự kiện trên contract (uint256, dạng string)
+  string session_id_for_contract = 4; // Session ID (uint256, dạng string)
+  // string value_sent_wei = 5;       // Không cần cho batchMint (onlyOwner), nhưng có thể dùng để tham khảo
+                                      // hoặc nếu bạn có logic off-chain payment verification
+}
+
+message MintTicketResponse {
+  bool success = 1;
+  string token_id = 2;            // ID của NFT đã được mint (uint256, dạng string)
+  string transaction_hash = 3;
+  string owner_address = 4;       // Địa chỉ người sở hữu thực tế sau khi mint
+}
+
+message VerifyTransactionRequest {
+  string transaction_hash = 1;
+}
+
+message VerifyTransactionResponse {
+  bool is_confirmed = 1;
+  bool success_on_chain = 2; // Giao dịch có thành công trên blockchain không (status 0x1)
+  string from_address = 3;
+  string to_address = 4;
+  string value_wei = 5;
+  uint64 block_number = 6;
+  // Thêm các thông tin khác từ giao dịch nếu cần
 }
