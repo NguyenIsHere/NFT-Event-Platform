@@ -13,22 +13,20 @@ COPY services/06-blockchain-service/package*.json ./
 # Cài đặt chỉ dependencies cần thiết cho production
 RUN npm ci --omit=dev
 
-# Sao chép mã nguồn của blockchain-service (bao gồm thư mục src/ và file .env)
-COPY services/06-blockchain-service/src ./src
-COPY services/06-blockchain-service/.env ./.env 
+# Copy toàn bộ mã nguồn của blockchain-service
+COPY services/06-blockchain-service/. ./ 
 
-# Sao chép thư mục protos dùng chung từ gốc dự án
-COPY protos ./protos 
+# Copy thư mục protos
+COPY protos /usr/src/app/protos
 
 # SAO CHÉP ARTIFACT (CHỨA ABI) VÀO IMAGE
 # Đường dẫn này phải khớp với nơi Hardhat build ra và contractUtils.js đọc vào
 COPY services/06-blockchain-service/artifacts/contracts/EventTicketNFT.sol/EventTicketNFT.json ./artifacts/contracts/EventTicketNFT.sol/EventTicketNFT.json
-
-# (Tùy chọn) Liệt kê cấu trúc thư mục bên trong image để debug
-RUN ls -R .
 
 # Expose port mà blockchain-service sẽ lắng nghe
 EXPOSE ${PORT:-50056}
 
 # Lệnh để chạy ứng dụng
 CMD [ "node", "src/server.js" ]
+
+

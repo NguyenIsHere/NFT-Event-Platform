@@ -69,7 +69,7 @@ if (!process.env.BLOCKCHAIN_SERVICE_ADDRESS) {
   )
 }
 
-const PROTOS_ROOT_DIR_IN_CONTAINER = path.resolve(__dirname, '..', 'protos') // Từ src/server.js -> ../protos
+const PROTOS_ROOT_DIR_IN_CONTAINER = path.join(process.cwd(), 'protos')
 const EVENT_PROTO_PATH = path.join(PROTOS_ROOT_DIR_IN_CONTAINER, 'event.proto')
 
 console.log(`${SERVICE_NAME}: Loading proto from ${EVENT_PROTO_PATH}`)

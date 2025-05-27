@@ -305,6 +305,5 @@ async function ConfirmPurchaseAndMintTicket (call, callback) {
 // ... (Handlers cho GetTicket, ListTicketsByEvent, ListTicketsByOwner) ...
 module.exports = {
   PreparePurchaseTicket,
-  ConfirmPurchaseAndMintTicket,
-  GetTicket /* ... */
+  ConfirmPurchaseAndMintTicket
 }

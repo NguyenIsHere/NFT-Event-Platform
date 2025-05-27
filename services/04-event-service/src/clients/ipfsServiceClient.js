@@ -3,7 +3,7 @@ const grpc = require('@grpc/grpc-js')
 const protoLoader = require('@grpc/proto-loader')
 const path = require('path')
 
-const PROTOS_ROOT_DIR = path.resolve(__dirname, '..', 'protos') // Trỏ ra /usr/src/app/protos trong image
+const PROTOS_ROOT_DIR = path.join(process.cwd(), 'protos')
 const IPFS_PROTO_PATH = path.join(PROTOS_ROOT_DIR, 'ipfs.proto')
 
 const ipfsPackageDefinition = protoLoader.loadSync(IPFS_PROTO_PATH, {

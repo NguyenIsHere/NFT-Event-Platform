@@ -7,6 +7,7 @@ const Schema = mongoose.Schema
 const ticketTypeSchema = new Schema(
   {
     eventId: { type: String, required: true, index: true },
+    sessionId: { type: String, required: true },
     blockchainEventId: { type: String, required: true, trim: true },
     name: { type: String, required: true, trim: true },
     totalQuantity: { type: Number, required: true },
@@ -47,7 +48,7 @@ const ticketSchema = new Schema(
     ticketTypeId: { type: String, required: true, index: true }, // ref: 'TicketType'
     tokenId: { type: String, unique: true, sparse: true, trim: true },
     ownerAddress: { type: String, trim: true, lowercase: true, index: true },
-    sessionId: { type: String, required: false },
+    sessionId: { type: String, required: true },
     status: { type: String, enum: TICKET_STATUS_ENUM, default: 'AVAILABLE' },
     tokenUriCid: { type: String, required: false },
     transactionHash: { type: String, required: false }

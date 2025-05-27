@@ -4,14 +4,15 @@ const grpc = require('@grpc/grpc-js')
 const mongoose = require('mongoose')
 const eventServiceClient = require('../clients/eventServiceClient') // Import eventServiceClient
 
+// Helper to convert Mongoose doc to proto message
 function ticketTypeToProto (ttDoc) {
-  /* ... (như đã cung cấp ở Canvas ticket_service_files_v1) ... */
   if (!ttDoc) return null
   const ttData = ttDoc.toJSON ? ttDoc.toJSON() : { ...ttDoc }
   return {
     id: ttData.id || ttDoc._id?.toString(),
     event_id: ttData.eventId || '',
-    blockchain_event_id: ttData.blockchainEventId || '', // Đã là string
+    session_id: ttData.sessionId || '', // Thêm session_id
+    blockchain_event_id: ttData.blockchainEventId || '',
     name: ttData.name || '',
     total_quantity: ttData.totalQuantity || 0,
     available_quantity: ttData.availableQuantity || 0,
@@ -26,73 +27,51 @@ function ticketTypeToProto (ttDoc) {
 }
 
 async function CreateTicketType (call, callback) {
-  const { event_id, blockchain_event_id, name, total_quantity, price_wei } =
-    call.request
+  const { event_id, session_id, name, total_quantity, price_wei } = call.request
   console.log(
-    `TicketService: CreateTicketType for event_id: ${event_id}, name: ${name}`
+    `TicketTypeService: CreateTicketType called for event_id: ${event_id}, session_id: ${session_id}, name: ${name}`
   )
   try {
-    if (!mongoose.Types.ObjectId.isValid(event_id)) {
-      return callback({
-        code: grpc.status.INVALID_ARGUMENT,
-        message: 'Invalid event_id format.'
-      })
-    }
-    // 1. Kiểm tra Event có tồn tại không (qua event-service)
-    try {
-      await new Promise((resolve, reject) => {
-        eventServiceClient.GetEvent(
-          { event_id },
-          { deadline: new Date(Date.now() + 5000) },
-          (err, response) => {
-            if (err) return reject(err)
-            if (!response || !response.event)
-              return reject(new Error('Event not found via EventService.'))
-            // So sánh blockchain_event_id từ request với cái của Event nếu cần
-            if (response.event.blockchain_event_id !== blockchain_event_id) {
-              return reject(
-                new Error(
-                  `BlockchainEventId mismatch: provided ${blockchain_event_id}, event has ${response.event.blockchain_event_id}`
-                )
-              )
-            }
-            resolve(response)
-          }
-        )
-      })
-    } catch (eventServiceError) {
-      console.error(
-        'TicketService: Error validating event via EventService:',
-        eventServiceError.details || eventServiceError.message
-      )
-      return callback({
-        code: grpc.status.FAILED_PRECONDITION,
-        message: `Event validation failed: ${
-          eventServiceError.details || eventServiceError.message
-        }`
-      })
-    }
+    // TODO (Quan trọng): Xác minh event_id và session_id có hợp lệ không
+    // bằng cách gọi event-service.GetEvent({event_id})
+    // rồi kiểm tra xem event có session với session_id đó không.
+    // Ví dụ:
+    // const eventResponse = await new Promise((resolve, reject) => {
+    //     eventServiceClient.GetEvent({event_id}, (err, res) => err ? reject(err) : resolve(res));
+    // });
+    // if (!eventResponse || !eventResponse.event) {
+    //     return callback({ code: grpc.status.NOT_FOUND, message: "Parent event not found."});
+    // }
+    // const sessionExists = eventResponse.event.sessions.some(s => s.id === session_id);
+    // if (!sessionExists) {
+    //     return callback({ code: grpc.status.NOT_FOUND, message: `Session ${session_id} not found in event ${event_id}.`});
+    // }
+    // blockchain_event_id của TicketType sẽ được cập nhật sau khi event được publish
 
     const newTicketType = new TicketType({
       eventId: event_id,
-      blockchainEventId: blockchain_event_id.toString(), // Đảm bảo là string
+      sessionId: session_id, // Lưu session_id
+      // blockchainEventId: để trống, sẽ được cập nhật sau
       name,
       totalQuantity: total_quantity,
-      availableQuantity: total_quantity,
-      priceWei: price_wei.toString() // Đảm bảo là string
+      availableQuantity: total_quantity, // Ban đầu
+      priceWei: price_wei
     })
     const savedTicketType = await newTicketType.save()
+    console.log(
+      `TicketTypeService: TicketType "${name}" created with ID ${savedTicketType.id} for session ${session_id}`
+    )
     callback(null, ticketTypeToProto(savedTicketType))
   } catch (error) {
-    console.error('TicketService: CreateTicketType RPC error:', error)
+    console.error('TicketTypeService: CreateTicketType RPC error:', error)
     if (
       error.code === 11000 ||
       (error.message && error.message.includes('duplicate key'))
     ) {
+      // Giả sử bạn có unique index trên (eventId, sessionId, name)
       return callback({
         code: grpc.status.ALREADY_EXISTS,
-        message:
-          'Ticket type name for this event already exists or other unique constraint violated.'
+        message: 'Ticket type with this name already exists for this session.'
       })
     }
     if (error.name === 'ValidationError') {
@@ -106,6 +85,72 @@ async function CreateTicketType (call, callback) {
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to create ticket type.'
+    })
+  }
+}
+
+async function UpdateTicketType (call, callback) {
+  const { ticket_type_id, blockchain_event_id /*, các trường khác nếu có */ } =
+    call.request
+  console.log(
+    `TicketTypeService: UpdateTicketType called for ID: ${ticket_type_id} with blockchain_event_id: ${blockchain_event_id}`
+  )
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid ticket_type_id format.'
+      })
+    }
+
+    const updateData = {}
+    if (blockchain_event_id) {
+      // Chỉ cập nhật nếu được cung cấp
+      updateData.blockchainEventId = blockchain_event_id
+    }
+    // Thêm các trường khác vào updateData nếu message UpdateTicketTypeRequest có chúng
+    // if (call.request.name && call.request.name.value) updateData.name = call.request.name.value;
+    // if (call.request.total_quantity && call.request.total_quantity.value !== undefined) {
+    //   updateData.totalQuantity = call.request.total_quantity.value;
+    //   // Cân nhắc cập nhật availableQuantity tương ứng nếu totalQuantity thay đổi
+    // }
+
+    if (Object.keys(updateData).length === 0) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'No update fields provided.'
+      })
+    }
+
+    const updatedTicketType = await TicketType.findByIdAndUpdate(
+      ticket_type_id,
+      { $set: updateData },
+      { new: true } // Trả về document đã được cập nhật
+    )
+
+    if (!updatedTicketType) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'TicketType not found to update.'
+      })
+    }
+    console.log(
+      `TicketTypeService: TicketType ${updatedTicketType.id} updated. BlockchainEventId set to ${updatedTicketType.blockchainEventId}`
+    )
+    callback(null, ticketTypeToProto(updatedTicketType))
+  } catch (error) {
+    console.error('TicketTypeService: UpdateTicketType RPC error:', error)
+    if (error.code === 11000) {
+      return callback({
+        code: grpc.status.ALREADY_EXISTS,
+        message:
+          'Update would cause a duplicate key violation (e.g., blockchainEventId if it has unique constraint with other fields).'
+      })
+    }
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to update ticket type.'
     })
   }
 }
@@ -162,4 +207,46 @@ async function ListTicketTypesByEvent (call, callback) {
   }
 }
 
-module.exports = { CreateTicketType, GetTicketType, ListTicketTypesByEvent }
+async function ListTicketTypesBySession (call, callback) {
+  const { event_id, session_id } = call.request
+  console.log(
+    `TicketTypeService: ListTicketTypesBySession for event_id: ${event_id}, session_id: ${session_id}`
+  )
+  try {
+    if (
+      !mongoose.Types.ObjectId.isValid(event_id) ||
+      (session_id && !mongoose.Types.ObjectId.isValid(session_id))
+    ) {
+      // Giả sử session_id cũng là ObjectId nếu nó là _id của Mongoose
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid event_id or session_id format.'
+      })
+    }
+    const query = { eventId: event_id }
+    if (session_id) {
+      query.sessionId = session_id
+    }
+    const ticketTypes = await TicketType.find(query).sort({ createdAt: 1 })
+    callback(null, {
+      ticket_types: ticketTypes.map(tt => ticketTypeToProto(tt))
+    })
+  } catch (error) {
+    console.error(
+      'TicketTypeService: ListTicketTypesBySession RPC error:',
+      error
+    )
+    callback({
+      code: grpc.status.INTERNAL,
+      message: 'Failed to list ticket types for session.'
+    })
+  }
+}
+
+module.exports = {
+  CreateTicketType,
+  UpdateTicketType, // Thêm handler mới
+  GetTicketType,
+  ListTicketTypesByEvent,
+  ListTicketTypesBySession // Thêm handler mới
+}

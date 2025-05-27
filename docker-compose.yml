@@ -5,16 +5,120 @@ services:
     ports:
       - "8500:8500"
       - "8600:8600/udp"
-      - "8600:8600/tcp"  # DNS cũng có thể dùng TCP
-    command: "agent -server -ui -client=0.0.0.0 -bootstrap-expect=1"
+      - "8600:8600/tcp"
+    command: "agent -server -ui -client=0.0.0.0 -bootstrap-expect=1" # Giữ nguyên command của bạn
     networks:
       microservices_network:
         ipv4_address: 172.23.0.2
-    healthcheck:
+    healthcheck: # Consul có healthcheck riêng trong Docker Compose
       test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  ipfs-service: # Service số 8
+    build:
+      context: .
+      dockerfile: ./services/08-ipfs-service/Dockerfile
+    container_name: ipfs_service
+    env_file:
+      - ./services/08-ipfs-service/.env
+    dns: ["172.23.0.2", "8.8.8.8", "1.1.1.1"]
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy # ipfs-service phụ thuộc Consul healthy
+
+  blockchain-service: # Service số 6
+    build:
+      context: .
+      dockerfile: ./services/06-blockchain-service/Dockerfile
+    container_name: blockchain_service
+    env_file:
+      - ./services/06-blockchain-service/.env
+    dns: ["172.23.0.2", "8.8.8.8", "1.1.1.1"]
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy # blockchain-service phụ thuộc Consul healthy
+
+  auth-service: # Service số 2
+    build:
+      context: .
+      dockerfile: ./services/02-auth-service/Dockerfile
+    container_name: auth_service
+    env_file:
+      - ./services/02-auth-service/.env
+    dns: ["172.23.0.2", "8.8.8.8", "1.1.1.1"]
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy # auth-service phụ thuộc Consul healthy
+      # user-service: # Nếu auth-service có gọi user-service lúc khởi tạo (ít khi)
+      #   condition: service_started
+
+  user-service: # Service số 3
+    build:
+      context: .
+      dockerfile: ./services/03-user-service/Dockerfile
+    container_name: user_service
+    env_file:
+      - ./services/03-user-service/.env
+    dns: ["172.23.0.2", "8.8.8.8", "1.1.1.1"]
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy # user-service phụ thuộc Consul healthy
+      # auth-service: # Nếu user-service có gọi auth-service lúc khởi tạo (ít khi)
+      #   condition: service_started
+
+  event-service: # Service số 4
+    build:
+      context: .
+      dockerfile: ./services/04-event-service/Dockerfile
+    container_name: event_service
+    env_file:
+      - ./services/04-event-service/.env
+    dns: ["172.23.0.2", "8.8.8.8", "1.1.1.1"]
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+      ipfs-service:
+        condition: service_started # Chờ ipfs-service container bắt đầu
+      blockchain-service:
+        condition: service_started # Chờ blockchain-service container bắt đầu
+      # auth-service: # Nếu cần xác thực organizer lúc event-service khởi tạo
+      #   condition: service_started
+
+  ticket-service: # Service số 5
+    build:
+      context: .
+      dockerfile: ./services/05-ticket-service/Dockerfile
+    container_name: ticket_service
+    env_file:
+      - ./services/05-ticket-service/.env
+    dns: ["172.23.0.2", "8.8.8.8", "1.1.1.1"]
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+      event-service:
+        condition: service_started # Chờ event-service container bắt đầu
+      ipfs-service:
+        condition: service_started # Chờ ipfs-service container bắt đầu
+      blockchain-service:
+        condition: service_started # Chờ blockchain-service container bắt đầu
+      # auth-service: # Nếu cần xác thực người mua lúc ticket-service khởi tạo
+      #   condition: service_started
+      # user-service: # Nếu cần thông tin người mua lúc ticket-service khởi tạo
+      #   condition: service_started
 
   kong-gateway-infra:
     image: kong:3.7
@@ -30,11 +134,11 @@ services:
       KONG_TRUSTED_IPS: "0.0.0.0/0"
       KONG_JWT_SHARED_SECRET_VAR: ${KONG_SHARED_JWT_SECRET}
       KONG_DNS_RESOLVER: '172.23.0.2:8600'
-      KONG_DNS_ORDER: 'LAST,SRV,A,CNAME' # Thử SRV trước
+      KONG_DNS_ORDER: 'LAST,SRV,A,CNAME'
     dns:
-      - "172.23.0.2"  # IP của Consul - Đặt lên đầu để ưu tiên cho .consul
-      - "8.8.8.8"     # DNS công cộng
-      - "1.1.1.1"    # DNS của Cloudflare
+      - "172.23.0.2"
+      - "8.8.8.8"
+      - "1.1.1.1"
     ports:
       - "8000:8000"
       - "8443:8443"
@@ -44,145 +148,26 @@ services:
       - ./protos:/etc/kong/protos:ro
     networks:
       - microservices_network
-    depends_on:
+    depends_on: # Kong phụ thuộc vào tất cả các service và Consul
       consul:
-        condition: service_healthy
-
-  auth-service:
-    build:
-      context: .
-      dockerfile: ./services/02-auth-service/Dockerfile
-    container_name: auth_service
-    env_file:
-      - ./services/02-auth-service/.env
-    dns:
-    - "172.23.0.2"
-    - "8.8.8.8"    # DNS của Google (cho tên miền internet)
-    - "1.1.1.1"    # DNS của Cloudflare
-    networks:
-      - microservices_network
-    depends_on:
-      consul:
-        condition: service_healthy
-
-  user-service:
-    build:
-      context: .
-      dockerfile: ./services/03-user-service/Dockerfile
-    container_name: user_service
-    env_file:
-      - ./services/03-user-service/.env
-    dns:
-    - "172.23.0.2"
-    - "8.8.8.8"    # DNS của Google (cho tên miền internet)
-    - "1.1.1.1"    # DNS của Cloudflare
-    networks:
-      - microservices_network
-    depends_on:
-      consul:
-        condition: service_healthy
-        
-  ipfs-service: # Service số 8
-    build:
-      context: .
-      dockerfile: ./services/08-ipfs-service/Dockerfile # Đường dẫn đến Dockerfile của ipfs-service
-    container_name: ipfs_service
-    env_file:
-      - ./services/08-ipfs-service/.env # PORT=50058 trong file này
-    dns:
-      - "172.23.0.2" # Consul DNS
-      - "8.8.8.8"
-      - "1.1.1.1"
-    networks:
-      - microservices_network
-    depends_on:
-      consul:
-        condition: service_healthy
+        condition: service_healthy # Chờ Consul healthy
+      auth-service:
+        condition: service_started # Chờ container auth-service bắt đầu
+      user-service:
+        condition: service_started # Chờ container user-service bắt đầu
+      ipfs-service:
+        condition: service_started # Chờ container ipfs-service bắt đầu
+      event-service:
+        condition: service_started # Chờ container event-service bắt đầu
+      ticket-service:
+        condition: service_started # Chờ container ticket-service bắt đầu
+      blockchain-service:
+        condition: service_started # Chờ container blockchain-service bắt đầu
 
 networks:
-  microservices_network: # Tên network mà các service của bạn tham chiếu đến
+  microservices_network:
     driver: bridge
-    ipam: # IP Address Management
+    ipam:
       driver: default
       config:
-        - subnet: "172.23.0.0/16" # Chọn một dải IP, ví dụ 172.23.0.0/16
-          # gateway: "172.23.0.1" # Tùy chọn, Docker thường tự xử lý gateway
-
-  # event-service:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: event_service
-  #   environment:
-  #     NODE_ENV: development
-  #     PORT: 50053
-  #     CONSUL_AGENT_HOST: consul
-  #     MONGO_URI: ${MONGO_URI_CLOUD}
-  #   volumes:
-  #     - ./services/04-event-service:/usr/src/app
-  #     - /usr/src/app/node_modules
-  #   networks:
-  #     - microservices_network
-  #   depends_on:
-  #     consul:
-  #       condition: service_healthy
-
-  # ticket-service:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: ticket_service
-  #   environment:
-  #     NODE_ENV: development
-  #     PORT: 50054
-  #     CONSUL_AGENT_HOST: consul
-  #     MONGO_URI: ${MONGO_URI_CLOUD}
-  #   volumes:
-  #     - ./services/05-ticket-service:/usr/src/app
-  #     - /usr/src/app/node_modules
-  #   networks:
-  #     - microservices_network
-  #   depends_on:
-  #     consul:
-  #       condition: service_healthy
-
-  # blockchain-service:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: blockchain_service
-  #   environment:
-  #     NODE_ENV: development
-  #     PORT: 50055
-  #     CONSUL_AGENT_HOST: consul
-  #     MONGO_URI: ${MONGO_URI_CLOUD}
-  #   volumes:
-  #     - ./services/06-blockchain-service:/usr/src/app
-  #     - /usr/src/app/node_modules
-  #   networks:
-  #     - microservices_network
-  #   depends_on:
-  #     consul:
-  #       condition: service_healthy
-
-  # seatmap-service:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: seatmap_service
-  #   environment:
-  #     NODE_ENV: development
-  #     PORT: 50056
-  #     CONSUL_AGENT_HOST: consul
-  #     MONGO_URI: ${MONGO_URI_CLOUD}
-  #   volumes:
-  #     - ./services/07-seatmap-service:/usr/src/app
-  #     - /usr/src/app/node_modules
-  #   networks:
-  #     - microservices_network
-  #   depends_on:
-  #     consul:
-  #       condition: service_healthy
-
-
-
+        - subnet: "172.23.0.0/16"

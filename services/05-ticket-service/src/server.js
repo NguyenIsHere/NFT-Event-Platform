@@ -66,7 +66,7 @@ if (
   )
 }
 
-const PROTOS_ROOT_DIR_IN_CONTAINER = path.resolve(__dirname, '..', 'protos')
+const PROTOS_ROOT_DIR_IN_CONTAINER = path.join(process.cwd(), 'protos')
 const TICKET_PROTO_PATH = path.join(
   PROTOS_ROOT_DIR_IN_CONTAINER,
   'ticket.proto'

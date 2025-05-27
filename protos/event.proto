@@ -23,6 +23,12 @@ service EventService {
       get: "/v1/events"
     };
   }
+  rpc PublishEvent(PublishEventRequest) returns (EventResponse) {
+    option (google.api.http) = {
+        post: "/v1/events/{event_id}/publish" // Hoặc một path khác
+        body: "*" // Có thể không cần body nếu chỉ cần event_id
+    };
+  }
   // Thêm UpdateEvent, DeleteEvent nếu cần
 }
 
@@ -36,6 +42,7 @@ message Event {
   string banner_url_cid = 6;       // CID của ảnh banner trên IPFS
   repeated Session sessions = 7;
   bool seat_map_enabled = 8;
+  string status = 9;
   bool is_active = 10;             // Sự kiện có đang mở bán không
   string created_at = 11;          // String ISO 8601 date
   string updated_at = 12;          // String ISO 8601 date
@@ -88,4 +95,13 @@ message ListEventsRequest {
 message ListEventsResponse {
   repeated Event events = 1;
   string next_page_token = 2;
+}
+
+message PublishEventRequest {
+  string event_id = 1; // ID của Event trong MongoDB
+  // Các thông tin cần để đăng ký lên blockchain nếu chưa có từ CreateEventRequest
+  // Hoặc event-service sẽ tự tổng hợp từ các TicketType
+  string desired_blockchain_event_id = 2; // ID mong muốn cho event trên contract
+  string default_price_wei_on_chain = 3;  // Giá mặc định cho event trên contract
+  string total_supply_on_chain = 4;       // Tổng cung cho event trên contract
 }
