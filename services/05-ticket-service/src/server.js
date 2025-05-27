@@ -1,4 +1,4 @@
-// 05-ticket-service/src/server.js (Tương tự các service khác)
+// 05-ticket-service/src/server.js
 const path = require('path')
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') })
 
@@ -14,11 +14,11 @@ const HealthImplementation = healthCheck.HealthImplementation
 const ticketServiceHandlers = require('./handlers/ticketServiceHandlers')
 const ticketTypeServiceHandlers = require('./handlers/ticketTypeServiceHandlers')
 
-const SERVICE_TYPE = process.env.SERVICE_TYPE // 'ticket'
+const SERVICE_TYPE = process.env.SERVICE_TYPE
 const PORT = process.env.PORT || 50055
 const MONGO_URI = process.env.MONGO_URI
 const CONSUL_AGENT_HOST = process.env.CONSUL_AGENT_HOST || 'consul'
-const SERVICE_NAME = process.env.SERVICE_NAME || 'ticket-service' // Hoặc có thể tách thành ticket-service và ticket-type-service
+const SERVICE_NAME = process.env.SERVICE_NAME || 'ticket-service'
 
 function getServiceIP () {
   /* ... (copy hàm getServiceIP) ... */
@@ -55,6 +55,16 @@ if (!MONGO_URI) {
   console.error(`FATAL ERROR for ${SERVICE_NAME}: MONGO_URI is not defined.`)
   process.exit(1)
 }
+// Kiểm tra các biến môi trường cho gRPC clients
+if (
+  !process.env.IPFS_SERVICE_ADDRESS ||
+  !process.env.BLOCKCHAIN_SERVICE_ADDRESS ||
+  !process.env.EVENT_SERVICE_ADDRESS
+) {
+  console.warn(
+    `WARNING for ${SERVICE_NAME}: One or more dependent service addresses (IPFS, Blockchain, Event) are not defined in .env. Calls may fail.`
+  )
+}
 
 const PROTOS_ROOT_DIR_IN_CONTAINER = path.resolve(__dirname, '..', 'protos')
 const TICKET_PROTO_PATH = path.join(
@@ -71,7 +81,7 @@ const mainPackageDefinition = protoLoader.loadSync(TICKET_PROTO_PATH, {
   oneofs: true,
   includeDirs: [PROTOS_ROOT_DIR_IN_CONTAINER]
 })
-const ticketProto = grpc.loadPackageDefinition(mainPackageDefinition).ticket
+const ticketProto = grpc.loadPackageDefinition(mainPackageDefinition).ticket // package 'ticket'
 const TicketServiceDefinition = ticketProto.TicketService.service
 const TicketTypeServiceDefinition = ticketProto.TicketTypeService.service
 
@@ -89,7 +99,7 @@ async function main () {
 
   const server = new grpc.Server()
   server.addService(TicketServiceDefinition, ticketServiceHandlers)
-  server.addService(TicketTypeServiceDefinition, ticketTypeServiceHandlers) // Add TicketTypeService
+  server.addService(TicketTypeServiceDefinition, ticketTypeServiceHandlers)
   healthImplementation.addToServer(server)
 
   server.bindAsync(
@@ -101,7 +111,7 @@ async function main () {
         process.exit(1)
       }
       console.log(
-        `${SERVICE_NAME} gRPC Service (incl. TicketTypeService) running on port ${boundPort}`
+        `${SERVICE_NAME} gRPC (Ticket & TicketType) Service running on port ${boundPort}`
       )
       server.start()
 

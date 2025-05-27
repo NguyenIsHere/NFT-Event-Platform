@@ -1,30 +1,36 @@
-// 04-event-service/src/handlers/eventServiceHandlers.js (KHUNG SƯỜN)
-const Event = require('../models/Event') // Giả sử EventModel.js đổi tên thành Event.js
+// 04-event-service/src/handlers/eventServiceHandlers.js
+const Event = require('../models/Event')
 const grpc = require('@grpc/grpc-js')
-const ipfsServiceClient = require('../clients/ipfsServiceClient') // Client gọi ipfs-service
-const blockchainServiceClient = require('../clients/blockchainServiceClient') // Client gọi blockchain-service
+const ipfsServiceClient = require('../clients/ipfsServiceClient')
+const blockchainServiceClient = require('../clients/blockchainServiceClient')
 const mongoose = require('mongoose')
 
-// Helper để chuyển đổi Mongoose document sang gRPC message
-function eventToEventResponse (eventDoc) {
+// Helper chuyển đổi Mongoose document sang gRPC message (đảm bảo khớp với Event message trong event.proto)
+function eventToGrpcEvent (eventDoc) {
   if (!eventDoc) return null
-  const eventData = eventDoc.toJSON() // Sử dụng toJSON đã định nghĩa trong schema
+  // Sử dụng toJSON() đã được tùy chỉnh trong schema để có 'id' và bỏ '_id', '__v'
+  const eventJson = eventDoc.toJSON()
+
   return {
-    event: {
-      ...eventData,
-      // Đảm bảo các trường sessions và timestamp được định dạng đúng nếu cần
-      sessions: eventData.sessions
-        ? eventData.sessions.map(s => ({
-            id: s.id || s._id?.toString(), // Lấy id hoặc _id
-            name: s.name,
-            start_time: s.startTime, // Giả sử model dùng startTime
-            end_time: s.endTime // Giả sử model dùng endTime
-          }))
-        : [],
-      created_at: eventDoc.createdAt ? eventDoc.createdAt.toISOString() : '',
-      updated_at: eventDoc.updatedAt ? eventDoc.updatedAt.toISOString() : ''
-      // blockchain_event_id đã là string trong model
-    }
+    id: eventJson.id,
+    organizer_id: eventJson.organizerId,
+    name: eventJson.name,
+    description: eventJson.description || '',
+    location: eventJson.location || '',
+    banner_url_cid: eventJson.bannerUrlCid || '',
+    sessions: eventJson.sessions
+      ? eventJson.sessions.map(s => ({
+          id: s.id, // session đã có virtual 'id'
+          name: s.name,
+          start_time: s.startTime, // Đảm bảo là int64 (Number trong JS)
+          end_time: s.endTime // Đảm bảo là int64 (Number trong JS)
+        }))
+      : [],
+    seat_map_enabled: eventJson.seatMapEnabled,
+    is_active: eventJson.isActive,
+    created_at: eventDoc.createdAt ? eventDoc.createdAt.toISOString() : '', // Chuyển Date sang ISO string
+    updated_at: eventDoc.updatedAt ? eventDoc.updatedAt.toISOString() : '', // Chuyển Date sang ISO string
+    blockchain_event_id: eventJson.blockchainEventId || '' // Đã là string
   }
 }
 
@@ -34,49 +40,59 @@ async function CreateEvent (call, callback) {
     name,
     description,
     location,
-    banner_file_content_base64, // Nội dung file banner đã mã hóa base64
-    banner_original_file_name, // Tên file banner gốc
-    sessions, // Đây là repeated SessionInput từ proto
+    banner_file_content_base64,
+    banner_original_file_name,
+    sessions,
     seat_map_enabled,
     is_active,
-    initial_blockchain_event_id, // Các trường để đăng ký blockchain nếu có
+    initial_blockchain_event_id,
     initial_price_wei,
     initial_total_supply
   } = call.request
 
-  console.log(`CreateEvent called for: ${name} by organizer ${organizer_id}`)
+  console.log(
+    `EventService: CreateEvent called for name: "${name}" by organizer: ${organizer_id}`
+  )
 
   try {
     let bannerUrlCid = ''
     if (banner_file_content_base64 && banner_original_file_name) {
-      // 1. Upload banner lên IPFS qua ipfs-service
+      console.log(
+        `EventService: Uploading banner "${banner_original_file_name}" to IPFS...`
+      )
       const fileContentBuffer = Buffer.from(
         banner_file_content_base64,
         'base64'
       )
+
       const ipfsResponse = await new Promise((resolve, reject) => {
         ipfsServiceClient.PinFileToIPFS(
           {
             file_content: fileContentBuffer,
             original_file_name: banner_original_file_name,
-            options: { pin_name: `event_banner_${name}` } // Tùy chọn
+            options: { pin_name: `event_banner_${name}_${Date.now()}` }
           },
+          { deadline: new Date(Date.now() + 5000) }, // Timeout 5 giây
           (err, response) => {
-            if (err) return reject(err)
+            if (err) {
+              console.error(
+                'EventService: Error calling PinFileToIPFS -',
+                err.details || err.message
+              )
+              return reject(err)
+            }
             resolve(response)
           }
         )
       })
       bannerUrlCid = ipfsResponse.ipfs_hash
-      console.log(`Banner uploaded to IPFS, CID: ${bannerUrlCid}`)
+      console.log(`EventService: Banner uploaded to IPFS, CID: ${bannerUrlCid}`)
     }
 
-    // Chuyển đổi SessionInput từ proto sang định dạng cho Mongoose schema
     const mongooseSessions = sessions.map(s_in => ({
       name: s_in.name,
-      startTime: s_in.start_time, // Đảm bảo kiểu dữ liệu khớp với schema (Number)
-      endTime: s_in.end_time // Đảm bảo kiểu dữ liệu khớp với schema (Number)
-      // _id sẽ tự tạo nếu sessionSchema có _id: true
+      startTime: Number(s_in.start_time), // Chuyển từ int64 (string/number) sang Number
+      endTime: Number(s_in.end_time)
     }))
 
     const newEvent = new Event({
@@ -84,18 +100,17 @@ async function CreateEvent (call, callback) {
       name,
       description,
       location,
-      bannerUrlCid: bannerUrlCid,
+      bannerUrlCid,
       sessions: mongooseSessions,
       seatMapEnabled: seat_map_enabled,
       isActive: is_active
-      // blockchainEventId sẽ được cập nhật sau nếu đăng ký blockchain thành công
+      // blockchainEventId sẽ được cập nhật sau nếu đăng ký thành công
     })
 
-    const savedEvent = await newEvent.save()
-    console.log(`Event created with DB ID: ${savedEvent.id}`)
-
-    // 2. (Tùy chọn) Đăng ký Event lên Blockchain ngay nếu có thông tin
-    let blockchainEventIdFromChain = savedEvent.blockchainEventId // Lấy từ DB nếu đã có
+    let savedEvent = await newEvent.save()
+    console.log(
+      `EventService: Event "${name}" created with DB ID: ${savedEvent.id}`
+    )
 
     if (
       initial_blockchain_event_id &&
@@ -103,58 +118,67 @@ async function CreateEvent (call, callback) {
       initial_total_supply
     ) {
       console.log(
-        `Registering event ${savedEvent.id} on blockchain with proposed ID ${initial_blockchain_event_id}`
+        `EventService: Registering event ${savedEvent.id} on blockchain with proposed ID ${initial_blockchain_event_id}`
       )
       try {
         const bcResponse = await new Promise((resolve, reject) => {
           blockchainServiceClient.RegisterEventOnBlockchain(
             {
               system_event_id_for_ref: savedEvent.id.toString(),
-              blockchain_event_id: initial_blockchain_event_id, // string
-              price_wei: initial_price_wei, // string
-              total_supply: initial_total_supply // string
+              blockchain_event_id: initial_blockchain_event_id.toString(), // Đảm bảo là string
+              price_wei: initial_price_wei.toString(),
+              total_supply: initial_total_supply.toString()
             },
+            { deadline: new Date(Date.now() + 15000) }, // Timeout 15 giây cho giao dịch blockchain
             (err, response) => {
-              if (err) return reject(err)
+              if (err) {
+                console.error(
+                  'EventService: Error calling RegisterEventOnBlockchain -',
+                  err.details || err.message
+                )
+                return reject(err)
+              }
               resolve(response)
             }
           )
         })
 
         if (bcResponse && bcResponse.success) {
-          blockchainEventIdFromChain = bcResponse.actual_blockchain_event_id
-          // Cập nhật lại event trong DB với blockchain_event_id thực tế
-          savedEvent.blockchainEventId = blockchainEventIdFromChain
-          await savedEvent.save()
+          savedEvent.blockchainEventId = bcResponse.actual_blockchain_event_id
+          savedEvent = await savedEvent.save() // Lưu lại với blockchainEventId
           console.log(
-            `Event ${savedEvent.id} registered on blockchain, chain_event_id: ${blockchainEventIdFromChain}, tx: ${bcResponse.transaction_hash}`
+            `EventService: Event ${savedEvent.id} registered on blockchain, chain_event_id: ${savedEvent.blockchainEventId}, tx: ${bcResponse.transaction_hash}`
           )
         } else {
           console.warn(
-            `Failed to register event ${savedEvent.id} on blockchain:`,
+            `EventService: Failed to register event ${savedEvent.id} on blockchain:`,
             bcResponse?.message || 'Unknown error from blockchain service'
           )
-          // Quyết định xem có nên rollback việc tạo event trong DB không, hoặc đánh dấu là chưa lên chain
         }
       } catch (bcError) {
         console.error(
-          `Error calling BlockchainService for event ${savedEvent.id}:`,
+          `EventService: Error calling BlockchainService for event ${savedEvent.id}:`,
           bcError.message
         )
-        // Xử lý lỗi khi gọi blockchain service
       }
     }
 
-    // Phải tạo EventResponse đúng cấu trúc proto
-    callback(null, eventToEventResponse(savedEvent))
+    callback(null, { event: eventToGrpcEvent(savedEvent) })
   } catch (error) {
-    console.error('CreateEvent RPC error:', error)
+    console.error('EventService: CreateEvent RPC error:', error)
     if (error.name === 'ValidationError') {
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
         message: Object.values(error.errors)
           .map(e => e.message)
           .join(', ')
+      })
+    }
+    if (error.code === 11000) {
+      // MongoDB duplicate key error
+      return callback({
+        code: grpc.status.ALREADY_EXISTS,
+        message: 'Event with this blockchainEventId already exists.'
       })
     }
     callback({
@@ -166,7 +190,7 @@ async function CreateEvent (call, callback) {
 
 async function GetEvent (call, callback) {
   const { event_id } = call.request
-  console.log(`GetEvent called for ID: ${event_id}`)
+  console.log(`EventService: GetEvent called for ID: ${event_id}`)
   try {
     if (!mongoose.Types.ObjectId.isValid(event_id)) {
       return callback({
@@ -181,9 +205,9 @@ async function GetEvent (call, callback) {
         message: 'Event not found.'
       })
     }
-    callback(null, eventToEventResponse(event))
+    callback(null, { event: eventToGrpcEvent(event) })
   } catch (error) {
-    console.error('GetEvent RPC error:', error)
+    console.error('EventService: GetEvent RPC error:', error)
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to get event.'
@@ -192,37 +216,41 @@ async function GetEvent (call, callback) {
 }
 
 async function ListEvents (call, callback) {
-  // Implement pagination and filtering logic here
-  const { organizer_id, page_size = 10, page_token } = call.request
+  const { organizer_id, page_size = 10, page_token } = call.request // page_token chưa dùng ở đây
   console.log(
-    `ListEvents called with organizer_id: ${organizer_id}, page_size: ${page_size}, page_token: ${page_token}`
+    `EventService: ListEvents called, organizer_id: ${organizer_id}, page_size: ${page_size}`
   )
-
   try {
     const query = {}
     if (organizer_id) {
       query.organizerId = organizer_id
     }
-
-    // Đơn giản hóa pagination cho ví dụ: bỏ qua page_token, dùng skip/limit
-    // Trong thực tế, bạn nên dùng cursor-based pagination với page_token (ví dụ: _id > last_id_from_page_token)
-    const skip = page_token ? parseInt(page_token, 10) : 0 // Đây là ví dụ đơn giản, không phải cursor thực sự
+    // Logic pagination đơn giản (cần cải thiện cho production)
+    let skip = 0
+    if (page_token && !isNaN(parseInt(page_token))) {
+      skip = parseInt(page_token) // page_token đang là số trang bỏ qua (ví dụ)
+    }
 
     const events = await Event.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(page_size)
+    const totalEvents = await Event.countDocuments(query) // Để tính toán next_page_token
 
-    // Ví dụ next_page_token đơn giản (chỉ để minh họa)
+    const grpcEvents = events.map(eventDoc => eventToGrpcEvent(eventDoc).event)
+
+    // next_page_token đơn giản, nếu còn item thì là skip + page_size
     const next_page_token_value =
-      events.length === page_size ? (skip + page_size).toString() : ''
+      skip + grpcEvents.length < totalEvents
+        ? (skip + page_size).toString()
+        : ''
 
     callback(null, {
-      events: events.map(eventDoc => eventToEventResponse(eventDoc).event), // Lấy phần event từ EventResponse
+      events: grpcEvents,
       next_page_token: next_page_token_value
     })
   } catch (error) {
-    console.error('ListEvents RPC error:', error)
+    console.error('EventService: ListEvents RPC error:', error)
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to list events.'
@@ -230,8 +258,4 @@ async function ListEvents (call, callback) {
   }
 }
 
-module.exports = {
-  CreateEvent,
-  GetEvent,
-  ListEvents
-}
+module.exports = { CreateEvent, GetEvent, ListEvents }

@@ -1,70 +1,24 @@
 // 05-ticket-service/src/models/Ticket.js
-const mongoose = require('mongoose') // Đã require ở trên nếu cùng file, tách file thì require lại
+// (Bao gồm cả TicketType và Ticket schema như đã cung cấp trong Canvas ticket_service_mongoose_schemas)
+const mongoose = require('mongoose')
 const Schema = mongoose.Schema
 
-// Định nghĩa các trạng thái vé có thể có
-const TICKET_STATUS_ENUM = [
-  'AVAILABLE',
-  'SOLD',
-  'USED',
-  'CANCELLED',
-  'PENDING_MINT'
-]
-
-const ticketSchema = new Schema(
+// TicketType Schema
+const ticketTypeSchema = new Schema(
   {
-    eventId: {
-      // ID của Event từ event-service
-      type: String, // Hoặc mongoose.Schema.Types.ObjectId, ref: 'Event'
-      required: true
-    },
-    ticketTypeId: {
-      // ID của TicketType
-      type: String, // Hoặc mongoose.Schema.Types.ObjectId, ref: 'TicketType'
-      required: true
-    },
-    tokenId: {
-      // ID của NFT trên blockchain (uint256 từ contract, lưu dạng string)
-      type: String, // Sẽ được cập nhật sau khi mint thành công
-      unique: true,
-      sparse: true, // Cho phép null/undefined trước khi mint
-      trim: true
-    },
-    ownerAddress: {
-      // Địa chỉ ví sở hữu vé NFT
-      type: String, // Sẽ được cập nhật sau khi mint hoặc transfer
-      trim: true,
-      lowercase: true
-    },
-    sessionId: {
-      // ID của session trong Event (nếu vé này dành cho session cụ thể)
-      // Có thể là string (nếu session ID trên contract là uint256)
-      // Hoặc ObjectId nếu bạn muốn quản lý Session như một collection riêng và ref tới _id của nó
-      type: String,
-      required: false // Tùy theo logic vé của bạn
-    },
-    status: {
-      type: String,
-      enum: TICKET_STATUS_ENUM,
-      default: 'AVAILABLE' // Hoặc PENDING_MINT nếu tạo trước khi mint
-    },
-    tokenUriCid: {
-      // CID của metadata JSON cho vé này (đã upload qua ipfs-service)
-      type: String,
-      required: false // Sẽ có khi chuẩn bị mint
-    },
-    transactionHash: {
-      // Hash của giao dịch mint vé trên blockchain
-      type: String,
-      required: false // Sẽ có sau khi giao dịch được gửi
-    }
-    // qrCodeData: String, // Dữ liệu mã QR, có thể tạo sau
+    eventId: { type: String, required: true, index: true },
+    blockchainEventId: { type: String, required: true, trim: true },
+    name: { type: String, required: true, trim: true },
+    totalQuantity: { type: Number, required: true },
+    availableQuantity: { type: Number, required: true },
+    priceWei: { type: String, required: true }
   },
   {
-    timestamps: true, // Tự động thêm createdAt và updatedAt
+    timestamps: true,
     toJSON: {
+      virtuals: true,
       transform: (doc, ret) => {
-        ret.id = ret._id
+        ret.id = ret._id.toString()
         delete ret._id
         delete ret.__v
         return ret
@@ -72,13 +26,50 @@ const ticketSchema = new Schema(
     }
   }
 )
+ticketTypeSchema.virtual('id').get(function () {
+  return this._id.toHexString()
+})
+ticketTypeSchema.index({ eventId: 1, name: 1 }, { unique: true })
+const TicketType = mongoose.model('TicketType', ticketTypeSchema)
 
-ticketSchema.index({ eventId: 1, ticketTypeId: 1 })
-ticketSchema.index({ ownerAddress: 1 })
-if (ticketSchema.paths.tokenId && ticketSchema.paths.tokenId.options.unique) {
-  ticketSchema.index({ tokenId: 1 }, { unique: true, sparse: true })
-}
+// Ticket Schema
+const TICKET_STATUS_ENUM = [
+  'AVAILABLE',
+  'SOLD',
+  'USED',
+  'PENDING_MINT',
+  'MINTED',
+  'CANCELLED'
+]
+const ticketSchema = new Schema(
+  {
+    eventId: { type: String, required: true, index: true },
+    ticketTypeId: { type: String, required: true, index: true }, // ref: 'TicketType'
+    tokenId: { type: String, unique: true, sparse: true, trim: true },
+    ownerAddress: { type: String, trim: true, lowercase: true, index: true },
+    sessionId: { type: String, required: false },
+    status: { type: String, enum: TICKET_STATUS_ENUM, default: 'AVAILABLE' },
+    tokenUriCid: { type: String, required: false },
+    transactionHash: { type: String, required: false }
+  },
+  {
+    timestamps: true,
+    toJSON: {
+      virtuals: true,
+      transform: (doc, ret) => {
+        ret.id = ret._id.toString()
+        delete ret._id
+        delete ret.__v
+        return ret
+      }
+    }
+  }
+)
+ticketSchema.virtual('id').get(function () {
+  return this._id.toHexString()
+})
+ticketSchema.index({ tokenId: 1 }, { unique: true, sparse: true })
 
 const Ticket = mongoose.model('Ticket', ticketSchema)
 
-module.exports = { Ticket, TICKET_STATUS_ENUM } // Export cả enum nếu cần dùng ở service
+module.exports = { Ticket, TicketType, TICKET_STATUS_ENUM }

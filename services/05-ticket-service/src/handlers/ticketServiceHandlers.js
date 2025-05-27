@@ -1,38 +1,46 @@
-// 05-ticket-service/src/handlers/ticketServiceHandlers.js (KHUNG SƯỜN)
-const { Ticket, TicketType, TICKET_STATUS_ENUM } = require('../models/Ticket') // Giả sử export chung từ Ticket.js
+// 05-ticket-service/src/handlers/ticketServiceHandlers.js (KHUNG SƯỜN CHI TIẾT HƠN)
+const { Ticket, TicketType, TICKET_STATUS_ENUM } = require('../models/Ticket')
 const grpc = require('@grpc/grpc-js')
 const ipfsServiceClient = require('../clients/ipfsServiceClient')
 const blockchainServiceClient = require('../clients/blockchainServiceClient')
-// const eventServiceClient = require('../clients/eventServiceClient'); // Nếu cần
+const eventServiceClient = require('../clients/eventServiceClient') // Import eventServiceClient
 const mongoose = require('mongoose')
 
-// Helper để chuyển đổi Ticket model sang Ticket message của proto
 function ticketToProto (ticketDoc) {
+  /* ... (như đã cung cấp ở Canvas ticket_service_files_v1) ... */
   if (!ticketDoc) return null
-  const ticketData = ticketDoc.toJSON()
+  const ticketData = ticketDoc.toJSON ? ticketDoc.toJSON() : { ...ticketDoc } // Handle plain objects if already transformed
+
+  // Ensure all fields expected by proto are present, with defaults for missing optional fields
   return {
-    ...ticketData,
+    id: ticketData.id || ticketDoc._id?.toString(),
+    event_id: ticketData.eventId || '',
+    ticket_type_id: ticketData.ticketTypeId || '',
+    token_id: ticketData.tokenId || '', // Đã là string từ model
+    owner_address: ticketData.ownerAddress || '',
+    session_id: ticketData.sessionId || '',
+    status: ticketData.status || '',
+    token_uri_cid: ticketData.tokenUriCid || '',
+    transaction_hash: ticketData.transactionHash || '',
     created_at: ticketDoc.createdAt
       ? Math.floor(new Date(ticketDoc.createdAt).getTime() / 1000)
-      : 0 // Unix timestamp seconds
-    // token_id đã là string trong model
+      : 0
   }
 }
 
 async function PreparePurchaseTicket (call, callback) {
   const { ticket_type_id, session_id, buyer_address } = call.request
   console.log(
-    `PreparePurchaseTicket called for ticket_type_id: ${ticket_type_id}, session: ${session_id}, buyer: ${buyer_address}`
+    `TicketService: PreparePurchaseTicket for ticket_type_id: ${ticket_type_id}, session: ${session_id}, buyer: ${buyer_address}`
   )
   try {
-    // 1. Lấy thông tin TicketType từ DB
     if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
         message: 'Invalid ticket_type_id format.'
       })
     }
-    const ticketType = await TicketType.findById(ticket_type_id)
+    const ticketType = await TicketType.findById(ticket_type_id).lean() // Use .lean() for plain JS object
     if (!ticketType) {
       return callback({
         code: grpc.status.NOT_FOUND,
@@ -46,61 +54,82 @@ async function PreparePurchaseTicket (call, callback) {
       })
     }
 
-    // 2. (Tùy chọn) Kiểm tra thông tin Event hoặc Session từ event-service nếu cần
-    // Ví dụ: const eventDetails = await eventServiceClient.GetEvent({ event_id: ticketType.eventId });
-    // Kiểm tra session_id có hợp lệ cho event đó không, event có active không, v.v.
-
-    // 3. Tạo metadata cho vé NFT
-    // Ví dụ đơn giản, bạn có thể lấy thêm thông tin từ EventService
-    const nftMetadata = {
-      name: `Ticket for ${ticketType.name} - EventID ${ticketType.eventId}`,
-      description: `A ticket of type ${ticketType.name}. Event Blockchain ID: ${
-        ticketType.blockchainEventId
-      }. Session: ${session_id || 'Any'}`,
-      // image: "ipfs://CID_ANH_DA_UPLOAD_CHO_EVENT_HOAC_LOAI_VE", // Lấy CID ảnh từ Event hoặc TicketType
-      attributes: [
-        { trait_type: 'Ticket Type', value: ticketType.name },
-        {
-          trait_type: 'Event Blockchain ID',
-          value: ticketType.blockchainEventId.toString()
-        },
-        { trait_type: 'Session', value: session_id || 'N/A' }
-      ]
-    }
-    const jsonContent = JSON.stringify(nftMetadata)
-
-    // 4. Upload metadata JSON lên IPFS qua ipfs-service
-    console.log(
-      `Uploading NFT metadata to IPFS for ticket type ${ticket_type_id}`
-    )
-    const ipfsResponse = await new Promise((resolve, reject) => {
-      ipfsServiceClient.PinJSONToIPFS(
-        {
-          json_content: jsonContent,
-          options: {
-            pin_name: `ticket_meta_${ticketType.name}_${new Date().getTime()}`
-          }
-        },
+    // Lấy thông tin Event để có thể dùng trong metadata
+    const eventDetailsResponse = await new Promise((resolve, reject) => {
+      eventServiceClient.GetEvent(
+        { event_id: ticketType.eventId },
+        { deadline: new Date(Date.now() + 5000) },
         (err, response) => {
           if (err) return reject(err)
           resolve(response)
         }
       )
     })
-    const tokenUriCid = ipfsResponse.ipfs_hash // Chỉ lấy hash, không có "ipfs://"
-    console.log(`NFT metadata pinned to IPFS. CID: ${tokenUriCid}`)
+    if (!eventDetailsResponse || !eventDetailsResponse.event) {
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: 'Associated event not found.'
+      })
+    }
+    const eventDetails = eventDetailsResponse.event
 
-    // 5. Lấy thông tin thanh toán từ blockchain-service
-    // (đã có giá từ ticketType, nhưng có thể cần địa chỉ contract)
+    const nftMetadata = {
+      name: `Ticket: ${ticketType.name} - Event: ${eventDetails.name}`,
+      description: `Ticket for event ${eventDetails.name}. Type: ${
+        ticketType.name
+      }. Session: ${session_id || 'Default'}.`,
+      image: eventDetails.banner_url_cid
+        ? `ipfs://${eventDetails.banner_url_cid}`
+        : 'ipfs://YOUR_DEFAULT_TICKET_IMAGE_CID_HERE', // Nên có ảnh vé chung hoặc ảnh sự kiện
+      external_url: `https://yourapp.com/events/${ticketType.eventId}/tickets/TBD`, // URL đến trang chi tiết vé (nếu có)
+      attributes: [
+        { trait_type: 'Event Name', value: eventDetails.name },
+        { trait_type: 'Ticket Type', value: ticketType.name },
+        {
+          trait_type: 'Event Blockchain ID',
+          value: ticketType.blockchainEventId.toString()
+        },
+        { trait_type: 'Session', value: session_id || 'Default' },
+        { trait_type: 'Price (WEI)', value: ticketType.priceWei }
+      ]
+    }
+    const jsonContent = JSON.stringify(nftMetadata)
+
     console.log(
-      `Getting payment details from BlockchainService for event_id: ${ticketType.blockchainEventId}`
+      `TicketService: Uploading NFT metadata to IPFS for ticket type ${ticket_type_id}`
+    )
+    const ipfsResponse = await new Promise((resolve, reject) => {
+      ipfsServiceClient.PinJSONToIPFS(
+        {
+          json_content: jsonContent,
+          options: {
+            pin_name: `ticket_meta_event_${
+              ticketType.eventId
+            }_tt_${ticket_type_id}_${Date.now()}`
+          }
+        },
+        { deadline: new Date(Date.now() + 10000) }, // Timeout 10s
+        (err, response) => {
+          if (err) return reject(err)
+          resolve(response)
+        }
+      )
+    })
+    const tokenUriCid = ipfsResponse.ipfs_hash
+    console.log(
+      `TicketService: NFT metadata pinned to IPFS. CID: ${tokenUriCid}`
+    )
+
+    console.log(
+      `TicketService: Getting payment details from BlockchainService for event_id: ${ticketType.blockchainEventId}`
     )
     const paymentDetails = await new Promise((resolve, reject) => {
       blockchainServiceClient.GetTicketPaymentDetails(
         {
-          blockchain_event_id: ticketType.blockchainEventId.toString(), // proto yêu cầu string
+          blockchain_event_id: ticketType.blockchainEventId.toString(),
           price_wei_from_ticket_type: ticketType.priceWei
         },
+        { deadline: new Date(Date.now() + 5000) },
         (err, response) => {
           if (err) return reject(err)
           resolve(response)
@@ -110,17 +139,25 @@ async function PreparePurchaseTicket (call, callback) {
 
     callback(null, {
       payment_contract_address: paymentDetails.payment_contract_address,
-      price_wei: paymentDetails.price_to_pay_wei, // Giá này có thể được xác nhận lại từ contract
-      blockchain_event_id: ticketType.blockchainEventId.toString(), // Đảm bảo là string
-      session_id_for_contract: session_id || '0', // Contract có thể cần uint256, "0" nếu không có session cụ thể
-      token_uri_cid: tokenUriCid // CID của metadata JSON (không có "ipfs://")
+      price_wei: paymentDetails.price_to_pay_wei,
+      blockchain_event_id: ticketType.blockchainEventId.toString(),
+      session_id_for_contract: session_id || '0', // Contract dùng uint256, 0 nếu không có session
+      token_uri_cid: tokenUriCid
     })
   } catch (error) {
-    console.error('PreparePurchaseTicket RPC error:', error)
-    // ... (xử lý lỗi chi tiết hơn)
+    console.error(
+      'TicketService: PreparePurchaseTicket RPC error:',
+      error.details || error.message || error
+    )
+    let grpcErrorCode = grpc.status.INTERNAL
+    if (error.code && Object.values(grpc.status).includes(error.code)) {
+      // Nếu lỗi đã là gRPC error từ service khác
+      grpcErrorCode = error.code
+    }
     callback({
-      code: grpc.status.INTERNAL,
-      message: error.message || 'Failed to prepare ticket purchase.'
+      code: grpcErrorCode,
+      message:
+        error.details || error.message || 'Failed to prepare ticket purchase.'
     })
   }
 }
@@ -128,11 +165,25 @@ async function PreparePurchaseTicket (call, callback) {
 async function ConfirmPurchaseAndMintTicket (call, callback) {
   const { transaction_hash, ticket_type_id, session_id, owner_address } =
     call.request
+  // **LƯU Ý QUAN TRỌNG VỀ LUỒNG NÀY:**
+  // Nếu người dùng tự gọi hàm `buyTickets()` trên contract, thì NFT đã được mint.
+  // Service này chỉ cần:
+  // 1. Xác minh `transaction_hash` (gọi `blockchain-service`).
+  // 2. Nếu thành công, lấy `tokenId` từ event `TicketMinted` (cũng nên do `blockchain-service` cung cấp qua `VerifyTransaction` hoặc RPC riêng).
+  // 3. Lưu vé vào DB, giảm `availableQuantity`.
+  //
+  // Nếu backend đứng ra mint HỘ người dùng (ví dụ sau khi nhận thanh toán off-chain),
+  // thì service này sẽ gọi `blockchain-service.MintTicket()` với `token_uri_cid` (từ bước Prepare hoặc tạo lại)
+  // và các thông tin cần thiết.
+  //
+  // Proto `ConfirmPurchaseAndMintTicketRequest` hiện tại không có `token_uri_cid` và `blockchain_event_id`.
+  // Tôi sẽ giả định luồng là người dùng đã tự mint bằng cách gọi `buyTickets` của contract,
+  // và chúng ta cần xác minh rồi lưu lại.
+
   console.log(
-    `ConfirmPurchaseAndMintTicket called for tx_hash: ${transaction_hash}, owner: ${owner_address}`
+    `TicketService: ConfirmPurchaseAndMintTicket for tx_hash: ${transaction_hash}, owner: ${owner_address}, ticket_type: ${ticket_type_id}`
   )
   try {
-    // 1. Kiểm tra TicketType tồn tại và còn vé
     if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
@@ -143,23 +194,18 @@ async function ConfirmPurchaseAndMintTicket (call, callback) {
     if (!ticketType) {
       return callback({
         code: grpc.status.NOT_FOUND,
-        message: 'TicketType not found.'
+        message: 'TicketType not found for confirmation.'
       })
     }
-    if (ticketType.availableQuantity <= 0) {
-      return callback({
-        code: grpc.status.FAILED_PRECONDITION,
-        message: 'Ticket type sold out while confirming.'
-      })
-    }
+    // Không giảm availableQuantity ở đây vội, chỉ giảm khi đã chắc chắn tx thành công và lấy được tokenId
 
-    // 2. Xác minh giao dịch trên blockchain qua blockchain-service
     console.log(
-      `Verifying transaction ${transaction_hash} via BlockchainService.`
+      `TicketService: Verifying transaction ${transaction_hash} via BlockchainService.`
     )
     const verifyResponse = await new Promise((resolve, reject) => {
       blockchainServiceClient.VerifyTransaction(
         { transaction_hash },
+        { deadline: new Date(Date.now() + 15000) },
         (err, response) => {
           if (err) return reject(err)
           resolve(response)
@@ -173,113 +219,92 @@ async function ConfirmPurchaseAndMintTicket (call, callback) {
       !verifyResponse.success_on_chain
     ) {
       console.error(
-        'Transaction verification failed or transaction not successful on chain:',
+        'TicketService: Transaction verification failed or transaction not successful on chain:',
         verifyResponse
       )
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
-        message: `Transaction ${transaction_hash} not confirmed or failed on chain.`
+        message: `Transaction ${transaction_hash} not confirmed or failed on chain. Status: ${verifyResponse?.success_on_chain}, Confirmed: ${verifyResponse?.is_confirmed}`
       })
     }
-    // (Tùy chọn) Kiểm tra thêm verifyResponse.to_address, verifyResponse.value_wei, verifyResponse.from_address (phải là owner_address)
+    console.log(
+      `TicketService: Transaction ${transaction_hash} verified successfully. From: ${verifyResponse.from_address}, To: ${verifyResponse.to_address}, Value: ${verifyResponse.value_wei}`
+    )
 
-    // 3. Nếu user tự gọi hàm buyTickets() của contract, thì NFT đã được mint.
-    // Chúng ta cần lấy tokenId từ event TicketMinted của contract.
-    // Cách tốt nhất là blockchain-service nên có một RPC để query tokenId từ transaction_hash (bằng cách đọc event log).
-    // Hoặc, nếu luồng là backend mint hộ (qua MintTicket RPC của blockchain-service), thì gọi nó ở đây.
-    // Giả sử luồng là user tự gọi buyTickets(), và chúng ta cần tìm tokenId.
-    // Đây là phần phức tạp, vì việc lấy tokenId từ tx_hash ngay lập tức có thể khó khăn nếu giao dịch chưa được mined hoàn toàn
-    // hoặc nếu không có cơ chế lắng nghe event hiệu quả.
-    //
-    // Tạm thời, chúng ta sẽ giả định rằng sau khi VerifyTransaction thành công,
-    // một quy trình khác (hoặc một event listener) sẽ cập nhật tokenId vào DB.
-    // Hoặc, nếu `MintTicket` RPC của blockchain service được thiết kế để mint và trả về tokenId
-    // và `ConfirmPurchaseAndMintTicketRequest` cung cấp đủ thông tin cho `MintTicket` RPC đó:
-    /*
-        const { token_uri_cid_from_prepare, blockchain_event_id_from_prepare, session_id_for_contract_from_prepare } = some_way_to_get_this_data_again_or_pass_from_client;
-        const mintResponse = await new Promise((resolve, reject) => {
-            blockchainServiceClient.MintTicket({
-                buyer_address: owner_address,
-                token_uri_cid: token_uri_cid_from_prepare, // Cần CID này
-                blockchain_event_id: blockchain_event_id_from_prepare, // Cần ID này
-                session_id_for_contract: session_id_for_contract_from_prepare // Cần session này
-            }, (err, response) => {
-                if (err) return reject(err);
-                resolve(response);
-            });
-        });
-        if (!mintResponse || !mintResponse.success) {
-            throw new Error(mintResponse.message || "Failed to mint NFT via BlockchainService after payment confirmation.");
-        }
-        const mintedTokenId = mintResponse.token_id;
-        */
-    // DO LUỒNG HIỆN TẠI USER TỰ GỌI buyTickets(), ta sẽ tạo vé PENDING_MINT và chờ một tiến trình khác cập nhật tokenId
-    // Hoặc, nếu VerifyTransaction có thể trả về tokenId từ event log thì tốt hơn.
+    // TODO: Lấy tokenId từ event `TicketMinted` của contract thông qua transaction_hash.
+    // Đây là phần quan trọng và cần có cơ chế đáng tin cậy.
+    // BlockchainService nên có một RPC như `GetTokenIdFromTransaction(transaction_hash)`
+    // Hoặc `VerifyTransactionResponse` nên bao gồm các event logs đã được parse.
+    // Tạm thời, chúng ta sẽ tạo vé với tokenId giả định hoặc để trống, đánh dấu là PENDING_MINT.
+    // Sau đó cần một worker để cập nhật tokenId này.
+    // Trong ví dụ của contract bạn, `buyTickets` sẽ emit `TicketMinted(tokenId, eventId, sessionId, owner, price)`
+    // Bạn cần một cách để blockchain-service đọc event này từ receipt và trả về tokenId.
+    // HoT LÀ NẾU blockchainService.MintTicket được dùng, thì nó sẽ trả về tokenId.
+    // Hiện tại proto `VerifyTransactionResponse` chưa có tokenId.
 
-    // 4. Tạo vé trong database với trạng thái chờ (hoặc đã bán nếu có tokenId)
+    // Giả sử chúng ta cần tokenUriCid (đã tạo ở bước Prepare) để lưu vào Ticket.
+    // Client có thể cần gửi lại hoặc service tự cache/query.
+    // Để đơn giản, ta sẽ tạo vé với status PENDING và chờ update tokenId & tokenUriCid.
+
+    // Kiểm tra xem vé với transaction_hash này đã được xử lý chưa (để tránh xử lý lại)
+    const existingTicketByTx = await Ticket.findOne({
+      transactionHash: transaction_hash
+    })
+    if (existingTicketByTx) {
+      console.warn(
+        `TicketService: Transaction hash ${transaction_hash} already processed for ticket ${existingTicketByTx.id}`
+      )
+      return callback(null, { ticket: ticketToProto(existingTicketByTx) })
+    }
+
     const newTicket = new Ticket({
       eventId: ticketType.eventId,
       ticketTypeId: ticket_type_id,
-      // tokenId: mintedTokenId, // Sẽ cập nhật sau nếu luồng là user tự mint
-      ownerAddress: owner_address.toLowerCase(), // Lưu địa chỉ dạng lowercase
-      sessionId: session_id, // session_id từ request
-      status: TICKET_STATUS_ENUM[4], // PENDING_MINT (hoặc SOLD nếu đã có tokenId)
-      // tokenUriCid: token_uri_cid_from_prepare, // Lưu lại CID đã dùng để mint
+      // tokenId: "PENDING_FROM_EVENT_LISTENER", // Sẽ được cập nhật bởi một tiến trình khác
+      ownerAddress: owner_address.toLowerCase(),
+      sessionId: session_id,
+      status: TICKET_STATUS_ENUM[3], // PENDING_MINT
+      // tokenUriCid: "UNKNOWN_YET_NEEDS_TO_BE_FETCHED_OR_PASSED_AGAIN", // Quan trọng: Cần CID này
       transactionHash: transaction_hash
     })
     const savedTicket = await newTicket.save()
 
-    // 5. Giảm số lượng vé còn lại của TicketType
-    ticketType.availableQuantity -= 1
-    await ticketType.save()
+    // Giảm số lượng vé chỉ khi thực sự tạo vé thành công (dù tokenId có thể pending)
+    // Cân nhắc đặt logic này sau khi đã chắc chắn có tokenId để tránh bán lố
+    if (ticketType.availableQuantity > 0) {
+      ticketType.availableQuantity -= 1
+      await ticketType.save()
+    } else {
+      console.warn(
+        `TicketService: TicketType ${ticket_type_id} available quantity was already 0 or less when trying to decrement.`
+      )
+      // Có thể cần xử lý thêm ở đây, ví dụ rollback việc tạo vé nếu không còn availableQuantity.
+    }
 
     console.log(
-      `Ticket ${savedTicket.id} created in DB for owner ${owner_address}, tx_hash ${transaction_hash}. Status: PENDING_MINT. Waiting for tokenId update.`
+      `TicketService: Ticket ${savedTicket.id} created in DB for owner ${owner_address}. Status: ${savedTicket.status}. Waiting for tokenId and tokenUri update.`
     )
-
-    // Cần một cơ chế (ví dụ: worker, event listener) để theo dõi transaction_hash,
-    // lấy tokenId từ event `TicketMinted` của contract, rồi cập nhật lại bản ghi Ticket trong DB.
-    // Hiện tại, ta trả về vé với thông tin đã có.
 
     callback(null, { ticket: ticketToProto(savedTicket) })
   } catch (error) {
-    console.error('ConfirmPurchaseAndMintTicket RPC error:', error)
+    console.error(
+      'TicketService: ConfirmPurchaseAndMintTicket RPC error:',
+      error.details || error.message || error
+    )
+    let grpcErrorCode = grpc.status.INTERNAL
+    if (error.code && Object.values(grpc.status).includes(error.code)) {
+      grpcErrorCode = error.code
+    }
     callback({
-      code: grpc.status.INTERNAL,
-      message: error.message || 'Failed to confirm purchase and mint ticket.'
+      code: grpcErrorCode,
+      message: error.details || error.message || 'Failed to confirm purchase.'
     })
   }
 }
 
-// ... (Các handlers khác như GetTicket, ListTicketsByEvent, ListTicketsByOwner) ...
-// Bạn cần tự viết logic cho chúng, ví dụ:
-async function GetTicket (call, callback) {
-  const { ticket_id } = call.request
-  try {
-    if (!mongoose.Types.ObjectId.isValid(ticket_id)) {
-      return callback({
-        code: grpc.status.INVALID_ARGUMENT,
-        message: 'Invalid ticket ID format.'
-      })
-    }
-    const ticket = await Ticket.findById(ticket_id)
-    if (!ticket) {
-      return callback({
-        code: grpc.status.NOT_FOUND,
-        message: 'Ticket not found.'
-      })
-    }
-    callback(null, ticketToProto(ticket))
-  } catch (error) {
-    console.error('GetTicket RPC error:', error)
-    callback({ code: grpc.status.INTERNAL, message: 'Failed to get ticket.' })
-  }
-}
-
+// ... (Handlers cho GetTicket, ListTicketsByEvent, ListTicketsByOwner) ...
 module.exports = {
   PreparePurchaseTicket,
   ConfirmPurchaseAndMintTicket,
-  GetTicket
-  // ListTicketsByEvent,
-  // ListTicketsByOwner,
+  GetTicket /* ... */
 }

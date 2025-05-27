@@ -15,10 +15,14 @@ RUN npm ci --omit=dev
 
 # Sao chép mã nguồn của blockchain-service (bao gồm thư mục src/ và file .env)
 COPY services/06-blockchain-service/src ./src
-COPY services/06-blockchain-service/.env ./.env
+COPY services/06-blockchain-service/.env ./.env 
 
 # Sao chép thư mục protos dùng chung từ gốc dự án
 COPY protos ./protos 
+
+# SAO CHÉP ARTIFACT (CHỨA ABI) VÀO IMAGE
+# Đường dẫn này phải khớp với nơi Hardhat build ra và contractUtils.js đọc vào
+COPY services/06-blockchain-service/artifacts/contracts/EventTicketNFT.sol/EventTicketNFT.json ./artifacts/contracts/EventTicketNFT.sol/EventTicketNFT.json
 
 # (Tùy chọn) Liệt kê cấu trúc thư mục bên trong image để debug
 RUN ls -R .

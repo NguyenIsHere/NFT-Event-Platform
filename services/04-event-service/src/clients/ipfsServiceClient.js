@@ -1,12 +1,12 @@
-// 04-event-service/src/clients/ipfsServiceClient.js (VÍ DỤ CƠ BẢN)
+// 04-event-service/src/clients/ipfsServiceClient.js
 const grpc = require('@grpc/grpc-js')
 const protoLoader = require('@grpc/proto-loader')
 const path = require('path')
 
-const PROTOS_ROOT_DIR = path.resolve(__dirname, '..', '..', 'protos') // Trỏ ra thư mục protos chung trong image
+const PROTOS_ROOT_DIR = path.resolve(__dirname, '..', 'protos') // Trỏ ra /usr/src/app/protos trong image
 const IPFS_PROTO_PATH = path.join(PROTOS_ROOT_DIR, 'ipfs.proto')
 
-const packageDefinition = protoLoader.loadSync(IPFS_PROTO_PATH, {
+const ipfsPackageDefinition = protoLoader.loadSync(IPFS_PROTO_PATH, {
   keepCase: true,
   longs: String,
   enums: String,
@@ -14,11 +14,12 @@ const packageDefinition = protoLoader.loadSync(IPFS_PROTO_PATH, {
   oneofs: true,
   includeDirs: [PROTOS_ROOT_DIR]
 })
-const ipfsProto = grpc.loadPackageDefinition(packageDefinition).ipfs
+const ipfsProto = grpc.loadPackageDefinition(ipfsPackageDefinition).ipfs // package 'ipfs'
 
 const IPFS_SERVICE_ADDRESS =
-  process.env.IPFS_SERVICE_ADDRESS || 'localhost:50058'
+  process.env.IPFS_SERVICE_ADDRESS || 'localhost:50058' // Lấy từ .env
 
+console.log(`EventService: IPFS client connecting to ${IPFS_SERVICE_ADDRESS}`)
 const ipfsServiceClient = new ipfsProto.IpfsService(
   IPFS_SERVICE_ADDRESS,
   grpc.credentials.createInsecure()

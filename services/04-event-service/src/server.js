@@ -1,11 +1,11 @@
-// 04-event-service/src/server.js (Tương tự các service khác)
+// 04-event-service/src/server.js
 const path = require('path')
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') })
 
 const os = require('os')
 const grpc = require('@grpc/grpc-js')
 const protoLoader = require('@grpc/proto-loader')
-const mongoose = require('mongoose') // Event service cần mongoose
+const mongoose = require('mongoose')
 const Consul = require('consul')
 const crypto = require('crypto')
 const healthCheck = require('grpc-health-check')
@@ -13,19 +13,19 @@ const HealthImplementation = healthCheck.HealthImplementation
 
 const eventServiceHandlers = require('./handlers/eventServiceHandlers')
 
-const SERVICE_TYPE = process.env.SERVICE_TYPE // 'event'
+const SERVICE_TYPE = process.env.SERVICE_TYPE
 const PORT = process.env.PORT || 50054
 const MONGO_URI = process.env.MONGO_URI
 const CONSUL_AGENT_HOST = process.env.CONSUL_AGENT_HOST || 'consul'
 const SERVICE_NAME = process.env.SERVICE_NAME || 'event-service'
 
 function getServiceIP () {
-  /* ... (copy hàm getServiceIP từ service khác) ... */
   const interfaces = os.networkInterfaces()
   for (const name of Object.keys(interfaces)) {
     for (const interfaceInfo of interfaces[name]) {
       if (interfaceInfo.family === 'IPv4' && !interfaceInfo.internal) {
         if (interfaceInfo.address.startsWith('172.23.')) {
+          // Điều chỉnh nếu cần
           return interfaceInfo.address
         }
       }
@@ -35,12 +35,15 @@ function getServiceIP () {
     for (const interfaceInfo of interfaces[name]) {
       if (interfaceInfo.family === 'IPv4' && !interfaceInfo.internal) {
         console.warn(
-          `${SERVICE_NAME}: Falling back to IP ${interfaceInfo.address}`
+          `${SERVICE_NAME}: Fallback: Using IP ${interfaceInfo.address}`
         )
         return interfaceInfo.address
       }
     }
   }
+  console.error(
+    `${SERVICE_NAME}: FATAL ERROR - Cannot find suitable IPv4 address.`
+  )
   throw new Error('Cannot find suitable IP address')
 }
 
@@ -54,8 +57,19 @@ if (!MONGO_URI) {
   console.error(`FATAL ERROR for ${SERVICE_NAME}: MONGO_URI is not defined.`)
   process.exit(1)
 }
+// Kiểm tra các biến môi trường cho gRPC clients
+if (!process.env.IPFS_SERVICE_ADDRESS) {
+  console.warn(
+    `WARNING for ${SERVICE_NAME}: IPFS_SERVICE_ADDRESS is not defined in .env. Calls to IPFS service may fail.`
+  )
+}
+if (!process.env.BLOCKCHAIN_SERVICE_ADDRESS) {
+  console.warn(
+    `WARNING for ${SERVICE_NAME}: BLOCKCHAIN_SERVICE_ADDRESS is not defined in .env. Calls to Blockchain service may fail.`
+  )
+}
 
-const PROTOS_ROOT_DIR_IN_CONTAINER = path.resolve(__dirname, '..', 'protos')
+const PROTOS_ROOT_DIR_IN_CONTAINER = path.resolve(__dirname, '..', 'protos') // Từ src/server.js -> ../protos
 const EVENT_PROTO_PATH = path.join(PROTOS_ROOT_DIR_IN_CONTAINER, 'event.proto')
 
 console.log(`${SERVICE_NAME}: Loading proto from ${EVENT_PROTO_PATH}`)
@@ -67,7 +81,7 @@ const mainPackageDefinition = protoLoader.loadSync(EVENT_PROTO_PATH, {
   oneofs: true,
   includeDirs: [PROTOS_ROOT_DIR_IN_CONTAINER]
 })
-const eventProto = grpc.loadPackageDefinition(mainPackageDefinition).event
+const eventProto = grpc.loadPackageDefinition(mainPackageDefinition).event // package 'event'
 const MainServiceDefinitionFromProto = eventProto.EventService.service
 
 const statusMap = { '': 'NOT_SERVING', [SERVICE_NAME]: 'NOT_SERVING' }
@@ -107,7 +121,17 @@ async function main () {
       const instanceId =
         process.env.HOSTNAME || crypto.randomBytes(8).toString('hex')
       const serviceId = `${SERVICE_NAME}-${instanceId}-${boundPort}`
-      const actualServiceIP = getServiceIP()
+
+      let actualServiceIP
+      try {
+        actualServiceIP = getServiceIP()
+        console.log(
+          `${SERVICE_NAME}: Determined service IP for Consul registration: ${actualServiceIP}`
+        )
+      } catch (ipError) {
+        console.error(`${SERVICE_NAME}: ${ipError.message}. Exiting.`)
+        process.exit(1)
+      }
 
       const check = {
         name: `gRPC health check for ${SERVICE_NAME} (${instanceId})`,
@@ -123,7 +147,7 @@ async function main () {
           id: serviceId,
           address: actualServiceIP,
           port: parseInt(PORT),
-          tags: ['grpc', 'nodejs', SERVICE_NAME],
+          tags: ['grpc', 'nodejs', SERVICE_NAME, 'event'],
           check: check
         })
         .then(() => {
@@ -139,7 +163,6 @@ async function main () {
         })
 
       process.on('SIGINT', async () => {
-        /* ... (SIGINT handler giống các service khác) ... */
         console.log(
           `Deregistering ${serviceId} from Consul for ${SERVICE_NAME}...`
         )
@@ -147,12 +170,16 @@ async function main () {
         healthImplementation.setStatus(SERVICE_NAME, 'NOT_SERVING')
         try {
           await consul.agent.service.deregister(serviceId)
-          console.log(`${serviceId} deregistered.`)
+          console.log(`${serviceId} deregistered from Consul.`)
         } catch (deregisterErr) {
-          console.error(`Error deregistering ${serviceId}:`, deregisterErr)
+          console.error(
+            `Error deregistering ${serviceId} from Consul:`,
+            deregisterErr
+          )
         } finally {
+          console.log(`Shutting down ${SERVICE_NAME} gRPC server...`)
           server.forceShutdown()
-          console.log(`${SERVICE_NAME} server shutdown.`)
+          console.log(`${SERVICE_NAME} server shutdown complete.`)
           process.exit(0)
         }
       })
