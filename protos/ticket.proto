@@ -31,91 +31,146 @@ message TicketType {
   int64 updated_at = 10;
 }
 
-// ----- TicketService -----
-service TicketService {
-  // Bước 1: Client yêu cầu tạo một "đơn hàng" vé (off-chain)
-  // Service sẽ kiểm tra thông tin, tạo metadata, lưu vé với trạng thái PENDING_PAYMENT
-  // và trả về thông tin thanh toán (địa chỉ contract, số tiền) cho client.
-  rpc InitiatePurchase(InitiatePurchaseRequest) returns (InitiatePurchaseResponse) {
-    option (google.api.http) = {
-      post: "/v1/tickets/initiate_purchase"
-      body: "*"
-    };
-  }
-
-  // Bước 2: Client gửi thông báo đã thanh toán (ví dụ: hash giao dịch off-chain, hoặc chỉ là xác nhận)
-  // Service xác minh thanh toán (nếu cần), sau đó gọi BlockchainService để mint vé.
-  // Nếu mint thành công, cập nhật trạng thái vé.
-  rpc ConfirmPaymentAndRequestMint(ConfirmPaymentAndRequestMintRequest) returns (ConfirmPaymentAndRequestMintResponse) {
-    option (google.api.http) = {
-      post: "/v1/tickets/confirm_payment_mint" // Đổi tên để rõ hơn là backend mint
-      body: "*"
-    };
-  }
-
-  rpc GetTicket(GetTicketRequest) returns (Ticket);
-  rpc ListTicketsByEvent(ListTicketsByEventRequest) returns (ListTicketsResponse);
-  rpc ListTicketsByOwner(ListTicketsByOwnerRequest) returns (ListTicketsResponse);
+// ----- Request/Response Messages -----
+message CreateTicketTypeRequest { 
+  string event_id = 1; 
+  string session_id = 2; 
+  string name = 3; 
+  int32 total_quantity = 4; 
+  string price_wei = 5;
 }
 
-// ----- TicketTypeService -----
-// (Giữ nguyên như bạn đã cung cấp trước đó, với CreateTicketType, UpdateTicketType, GetTicketType, ListTicketTypesByEvent, ListTicketTypesBySession)
-service TicketTypeService {
-  rpc CreateTicketType(CreateTicketTypeRequest) returns (TicketType) {
-    option (google.api.http) = {
-      post: "/v1/events/{event_id}/sessions/{session_id}/ticket_types"
-      body: "*"
-    };
-  }
-  rpc UpdateTicketType(UpdateTicketTypeRequest) returns (TicketType) {
-    option (google.api.http) = {
-      put: "/v1/ticket_types/{ticket_type_id}"
-      body: "*"
-    };
-  }
-  rpc GetTicketType(GetTicketTypeRequest) returns (TicketType);
-  rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse);
-  rpc ListTicketTypesBySession(ListTicketTypesBySessionRequest) returns (ListTicketTypesResponse);
+message UpdateTicketTypeRequest { 
+  string ticket_type_id = 1; 
+  string blockchain_event_id = 2;
 }
 
+message GetTicketTypeRequest { 
+  string ticket_type_id = 1; 
+}
 
-// ----- Messages cho luồng Backend Mint -----
+message ListTicketTypesByEventRequest { 
+  string event_id = 1; 
+}
+
+message ListTicketTypesBySessionRequest { 
+  string event_id = 1; 
+  string session_id = 2; 
+}
+
+message ListTicketTypesResponse { 
+  repeated TicketType ticket_types = 1; 
+}
+
 message InitiatePurchaseRequest {
   string ticket_type_id = 1;
   string buyer_address = 2; // Địa chỉ ví của người sẽ nhận NFT
-  // session_id có thể lấy từ ticket_type_id
 }
 
 message InitiatePurchaseResponse {
-  string ticket_order_id = 1;        // ID của đơn hàng vé (ví dụ: _id của Ticket vừa tạo với status PENDING_PAYMENT)
-  string payment_contract_address = 2; // Địa chỉ contract EventTicketNFT (để user xem, nhưng không tự gọi buyTickets)
+  string ticket_order_id = 1;        // ID của đơn hàng vé
+  string payment_contract_address = 2; // Địa chỉ contract EventTicketNFT
   string price_to_pay_wei = 3;         // Số tiền cần thanh toán
   string blockchain_event_id = 4;      // ID sự kiện trên blockchain
   string session_id_for_contract = 5;  // Session ID cho contract
-  // Không cần trả về token_uri_cid cho client ở bước này nếu backend mint
-  // Client chỉ cần biết cần thanh toán bao nhiêu và vào đâu (nếu thanh toán on-chain cho 1 contract khác)
-  // Hoặc thông tin để thanh toán off-chain.
 }
 
 message ConfirmPaymentAndRequestMintRequest {
   string ticket_order_id = 1;  // ID của đơn hàng vé từ InitiatePurchaseResponse
-  string payment_transaction_hash = 2; // Hash của giao dịch thanh toán (nếu có, ví dụ off-chain hoặc on-chain vào ví owner)
-                                       // Hoặc một tham chiếu đến bằng chứng thanh toán.
-  // owner_address đã có khi InitiatePurchase
+  string payment_transaction_hash = 2; // Hash của giao dịch thanh toán
 }
 
 message ConfirmPaymentAndRequestMintResponse {
-  Ticket ticket = 1; // Trả về thông tin vé đã được cập nhật (ví dụ: status MINTING hoặc MINTED)
+  Ticket ticket = 1; // Trả về thông tin vé đã được cập nhật
 }
 
-message GetTicketRequest { string ticket_id = 1; }
-message ListTicketsByEventRequest { string event_id = 1; int32 page_size = 2; string page_token = 3; }
-message ListTicketsByOwnerRequest { string owner_address = 1; int32 page_size = 2; string page_token = 3; }
-message ListTicketsResponse { repeated Ticket tickets = 1; string next_page_token = 2; }
+message GetTicketRequest { 
+  string ticket_id = 1; 
+}
 
-message CreateTicketTypeRequest { string event_id = 1; string session_id = 2; string name = 3; int32 total_quantity = 4; string price_wei = 5;}
-message UpdateTicketTypeRequest { string ticket_type_id = 1; string blockchain_event_id = 2;}
-message GetTicketTypeRequest { string ticket_type_id = 1; }
-message ListTicketTypesByEventRequest { string event_id = 1; }
-message ListTicketTypesBySessionRequest { string event_id = 1; string session_id = 2; }
-message ListTicketTypesResponse { repeated TicketType ticket_types = 1; }
+message ListTicketsByEventRequest { 
+  string event_id = 1; 
+  int32 page_size = 2; 
+  string page_token = 3; 
+}
+
+message ListTicketsByOwnerRequest { 
+  string owner_address = 1; 
+  int32 page_size = 2; 
+  string page_token = 3; 
+}
+
+message ListTicketsResponse { 
+  repeated Ticket tickets = 1; 
+  string next_page_token = 2; 
+}
+
+// ----- TicketTypeService - PATHS KHÁC NHAU ĐỂ TRÁNH CONFLICT -----
+service TicketTypeService {
+  rpc CreateTicketType(CreateTicketTypeRequest) returns (TicketType) {
+    option (google.api.http) = {
+      post: "/v1/ticket-types/create"  // THAY ĐỔI PATH
+      body: "*"
+    };
+  }
+  
+  rpc UpdateTicketType(UpdateTicketTypeRequest) returns (TicketType) {
+    option (google.api.http) = {
+      put: "/v1/ticket-types/{ticket_type_id}"
+      body: "*"
+    };
+  }
+  
+  rpc GetTicketType(GetTicketTypeRequest) returns (TicketType) {
+    option (google.api.http) = {
+      get: "/v1/ticket-types/{ticket_type_id}"
+    };
+  }
+  
+  rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse) {
+    option (google.api.http) = {
+      get: "/v1/ticket-types/by-event/{event_id}"  // THAY ĐỔI PATH
+    };
+  }
+  
+  rpc ListTicketTypesBySession(ListTicketTypesBySessionRequest) returns (ListTicketTypesResponse) {
+    option (google.api.http) = {
+      get: "/v1/ticket-types/by-session/{event_id}/{session_id}"  // THAY ĐỔI PATH
+    };
+  }
+}
+
+// ----- TicketService -----
+service TicketService {
+  rpc InitiatePurchase(InitiatePurchaseRequest) returns (InitiatePurchaseResponse) {
+    option (google.api.http) = {
+      post: "/v1/tickets/initiate-purchase"
+      body: "*"
+    };
+  }
+
+  rpc ConfirmPaymentAndRequestMint(ConfirmPaymentAndRequestMintRequest) returns (ConfirmPaymentAndRequestMintResponse) {
+    option (google.api.http) = {
+      post: "/v1/tickets/confirm-payment-mint"
+      body: "*"
+    };
+  }
+
+  rpc GetTicket(GetTicketRequest) returns (Ticket) {
+    option (google.api.http) = {
+      get: "/v1/tickets/{ticket_id}"
+    };
+  }
+  
+  rpc ListTicketsByEvent(ListTicketsByEventRequest) returns (ListTicketsResponse) {
+    option (google.api.http) = {
+      get: "/v1/tickets/by-event/{event_id}"  // THAY ĐỔI PATH
+    };
+  }
+  
+  rpc ListTicketsByOwner(ListTicketsByOwnerRequest) returns (ListTicketsResponse) {
+    option (google.api.http) = {
+      get: "/v1/tickets/by-owner/{owner_address}"  // THAY ĐỔI PATH
+    };
+  }
+}

@@ -8,7 +8,7 @@ const ticketTypeSchema = new Schema(
   {
     eventId: { type: String, required: true, index: true },
     sessionId: { type: String, required: true },
-    blockchainEventId: { type: String, required: true, trim: true },
+    blockchainEventId: { type: String, required: false, trim: true },
     name: { type: String, required: true, trim: true },
     totalQuantity: { type: Number, required: true },
     availableQuantity: { type: Number, required: true },

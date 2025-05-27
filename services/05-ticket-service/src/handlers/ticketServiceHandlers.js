@@ -354,20 +354,20 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
 }
 
 // ... (GetTicket, ListTicketsByEvent, ListTicketsByOwner giữ nguyên như trước) ...
-async function GetTicket (call, callback) {
-  /* ... */
-}
-async function ListTicketsByEvent (call, callback) {
-  /* ... */
-}
-async function ListTicketsByOwner (call, callback) {
-  /* ... */
-}
+// async function GetTicket (call, callback) {
+//   /* ... */
+// }
+// async function ListTicketsByEvent (call, callback) {
+//   /* ... */
+// }
+// async function ListTicketsByOwner (call, callback) {
+//   /* ... */
+// }
 
 module.exports = {
   InitiatePurchase,
-  ConfirmPaymentAndRequestMint,
-  GetTicket,
-  ListTicketsByEvent,
-  ListTicketsByOwner
+  ConfirmPaymentAndRequestMint
+  // GetTicket,
+  // ListTicketsByEvent,
+  // ListTicketsByOwner
 }
