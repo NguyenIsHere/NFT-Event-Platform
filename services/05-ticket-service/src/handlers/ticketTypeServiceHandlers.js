@@ -89,71 +89,71 @@ async function CreateTicketType (call, callback) {
   }
 }
 
-// async function UpdateTicketType (call, callback) {
-//   const { ticket_type_id, blockchain_event_id /*, các trường khác nếu có */ } =
-//     call.request
-//   console.log(
-//     `TicketTypeService: UpdateTicketType called for ID: ${ticket_type_id} with blockchain_event_id: ${blockchain_event_id}`
-//   )
+async function UpdateTicketType (call, callback) {
+  const { ticket_type_id, blockchain_event_id /*, các trường khác nếu có */ } =
+    call.request
+  console.log(
+    `TicketTypeService: UpdateTicketType called for ID: ${ticket_type_id} with blockchain_event_id: ${blockchain_event_id}`
+  )
 
-//   try {
-//     if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
-//       return callback({
-//         code: grpc.status.INVALID_ARGUMENT,
-//         message: 'Invalid ticket_type_id format.'
-//       })
-//     }
+  try {
+    if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid ticket_type_id format.'
+      })
+    }
 
-//     const updateData = {}
-//     if (blockchain_event_id) {
-//       // Chỉ cập nhật nếu được cung cấp
-//       updateData.blockchainEventId = blockchain_event_id
-//     }
-//     // Thêm các trường khác vào updateData nếu message UpdateTicketTypeRequest có chúng
-//     // if (call.request.name && call.request.name.value) updateData.name = call.request.name.value;
-//     // if (call.request.total_quantity && call.request.total_quantity.value !== undefined) {
-//     //   updateData.totalQuantity = call.request.total_quantity.value;
-//     //   // Cân nhắc cập nhật availableQuantity tương ứng nếu totalQuantity thay đổi
-//     // }
+    const updateData = {}
+    if (blockchain_event_id) {
+      // Chỉ cập nhật nếu được cung cấp
+      updateData.blockchainEventId = blockchain_event_id
+    }
+    // Thêm các trường khác vào updateData nếu message UpdateTicketTypeRequest có chúng
+    // if (call.request.name && call.request.name.value) updateData.name = call.request.name.value;
+    // if (call.request.total_quantity && call.request.total_quantity.value !== undefined) {
+    //   updateData.totalQuantity = call.request.total_quantity.value;
+    //   // Cân nhắc cập nhật availableQuantity tương ứng nếu totalQuantity thay đổi
+    // }
 
-//     if (Object.keys(updateData).length === 0) {
-//       return callback({
-//         code: grpc.status.INVALID_ARGUMENT,
-//         message: 'No update fields provided.'
-//       })
-//     }
+    if (Object.keys(updateData).length === 0) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'No update fields provided.'
+      })
+    }
 
-//     const updatedTicketType = await TicketType.findByIdAndUpdate(
-//       ticket_type_id,
-//       { $set: updateData },
-//       { new: true } // Trả về document đã được cập nhật
-//     )
+    const updatedTicketType = await TicketType.findByIdAndUpdate(
+      ticket_type_id,
+      { $set: updateData },
+      { new: true } // Trả về document đã được cập nhật
+    )
 
-//     if (!updatedTicketType) {
-//       return callback({
-//         code: grpc.status.NOT_FOUND,
-//         message: 'TicketType not found to update.'
-//       })
-//     }
-//     console.log(
-//       `TicketTypeService: TicketType ${updatedTicketType.id} updated. BlockchainEventId set to ${updatedTicketType.blockchainEventId}`
-//     )
-//     callback(null, ticketTypeToProto(updatedTicketType))
-//   } catch (error) {
-//     console.error('TicketTypeService: UpdateTicketType RPC error:', error)
-//     if (error.code === 11000) {
-//       return callback({
-//         code: grpc.status.ALREADY_EXISTS,
-//         message:
-//           'Update would cause a duplicate key violation (e.g., blockchainEventId if it has unique constraint with other fields).'
-//       })
-//     }
-//     callback({
-//       code: grpc.status.INTERNAL,
-//       message: error.message || 'Failed to update ticket type.'
-//     })
-//   }
-// }
+    if (!updatedTicketType) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'TicketType not found to update.'
+      })
+    }
+    console.log(
+      `TicketTypeService: TicketType ${updatedTicketType.id} updated. BlockchainEventId set to ${updatedTicketType.blockchainEventId}`
+    )
+    callback(null, ticketTypeToProto(updatedTicketType))
+  } catch (error) {
+    console.error('TicketTypeService: UpdateTicketType RPC error:', error)
+    if (error.code === 11000) {
+      return callback({
+        code: grpc.status.ALREADY_EXISTS,
+        message:
+          'Update would cause a duplicate key violation (e.g., blockchainEventId if it has unique constraint with other fields).'
+      })
+    }
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to update ticket type.'
+    })
+  }
+}
 
 async function GetTicketType (call, callback) {
   const { ticket_type_id } = call.request
@@ -245,7 +245,7 @@ async function ListTicketTypesBySession (call, callback) {
 
 module.exports = {
   CreateTicketType,
-  // UpdateTicketType, // Thêm handler mới
+  UpdateTicketType, // Thêm handler mới
   GetTicketType,
   ListTicketTypesByEvent,
   ListTicketTypesBySession // Thêm handler mới

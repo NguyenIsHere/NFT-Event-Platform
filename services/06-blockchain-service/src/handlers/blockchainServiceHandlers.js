@@ -128,85 +128,91 @@ async function waitForTransaction (txResponse, confirmations = 1) {
 // Hàm helper mới để chuẩn bị txOptions với logic gas linh hoạt
 async function prepareGasOptions () {
   const feeData = await provider.getFeeData()
-  console.log('Current fee data from network:', {
-    gasPrice: feeData.gasPrice ? feeData.gasPrice.toString() : 'N/A', // Wei
+  console.log('Linea Sepolia - Current fee data from network:', {
+    gasPrice: feeData.gasPrice ? feeData.gasPrice.toString() : 'N/A',
     maxFeePerGas: feeData.maxFeePerGas
       ? feeData.maxFeePerGas.toString()
-      : 'N/A', // Wei
+      : 'N/A',
     maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
       ? feeData.maxPriorityFeePerGas.toString()
-      : 'N/A', // Wei
+      : 'N/A',
     lastBaseFeePerGas: feeData.lastBaseFeePerGas
       ? feeData.lastBaseFeePerGas.toString()
-      : 'N/A' // Wei (ethers v6)
+      : 'N/A'
   })
 
   const txOptions = {}
 
-  // Ưu tiên EIP-1559
-  // Base fee của Linea Sepolia rất thấp (ví dụ 7 Wei), nên tip nhỏ cũng đủ
-  // Đặt tip qua biến môi trường hoặc một giá trị cố định nhỏ
-  const priorityFeeWei = BigInt(
-    process.env.LINEA_PRIORITY_FEE_WEI || '10000000'
-  ) // 10,000,000 Wei = 0.01 Gwei
-
-  // lastBaseFeePerGas từ provider là tin cậy nhất, nếu không có, dùng giá trị bạn quan sát được
+  // Lấy base fee từ provider, nếu không có thì dùng fallback (ví dụ 7 Wei từ explorer)
   const currentBaseFee =
     feeData.lastBaseFeePerGas ||
-    BigInt(process.env.LINEA_FALLBACK_BASE_FEE_WEI || '7') // 7 Wei nếu provider không trả về
+    BigInt(process.env.LINEA_FALLBACK_BASE_FEE_WEI || '7')
 
-  txOptions.maxPriorityFeePerGas = priorityFeeWei
-  // maxFeePerGas = currentBaseFee + tip + một chút buffer
+  // Đặt Max Priority Fee (Tip)
+  // Dựa trên giao dịch thành công của bạn (0.214 Gwei), có vẻ tip cao được ưu tiên.
+  // Tuy nhiên, có thể không cần cao đến vậy nếu base fee thực sự là 7 Wei.
+  // Hãy thử một mức tip hợp lý, ví dụ 0.05 Gwei đến 0.1 Gwei, có thể cấu hình qua .env
+  // 0.05 Gwei = 50,000,000 Wei
+  // 0.1  Gwei = 100,000,000 Wei
+  // Giao dịch thành công của bạn có tip ~0.21 Gwei, nhưng đó có thể là do provider.getFeeData() đã gợi ý như vậy.
+
+  // Nếu provider gợi ý maxPriorityFeePerGas và nó hợp lý (ví dụ > 0.001 Gwei), hãy dùng nó.
+  // Nếu không, đặt một giá trị mặc định.
+  let priorityFeeToUse
+  const minSensiblePriorityFee = ethers.parseUnits(
+    process.env.LINEA_MIN_SENSIBLE_PRIORITY_FEE_GWEI || '0.01',
+    'gwei'
+  ) // Ví dụ: 0.01 Gwei
+
+  if (
+    feeData.maxPriorityFeePerGas &&
+    feeData.maxPriorityFeePerGas >= minSensiblePriorityFee
+  ) {
+    priorityFeeToUse = feeData.maxPriorityFeePerGas
+    console.log(
+      `Using provider's suggested maxPriorityFeePerGas: ${priorityFeeToUse.toString()} Wei`
+    )
+  } else {
+    priorityFeeToUse = minSensiblePriorityFee
+    console.log(
+      `Provider's maxPriorityFeePerGas is too low or N/A. Using default minimum priority fee: ${priorityFeeToUse.toString()} Wei`
+    )
+  }
+  txOptions.maxPriorityFeePerGas = priorityFeeToUse
+
+  // Tính Max Fee Per Gas = Base Fee (hiện tại hoặc dự kiến) + Tip + Buffer
   // Buffer để phòng trường hợp base fee tăng nhẹ ở block tiếp theo
-  const bufferForMaxFee = BigInt(
-    process.env.LINEA_MAX_FEE_BUFFER_WEI || '5000000'
-  ) // 5,000,000 Wei = 0.005 Gwei
-  txOptions.maxFeePerGas = currentBaseFee + priorityFeeWei + bufferForMaxFee
+  const bufferForMaxFee = ethers.parseUnits(
+    process.env.LINEA_MAX_FEE_BUFFER_GWEI || '0.05',
+    'gwei'
+  ) // Ví dụ: buffer 0.05 Gwei
+  txOptions.maxFeePerGas =
+    currentBaseFee + txOptions.maxPriorityFeePerGas + bufferForMaxFee
 
-  // Đảm bảo maxFeePerGas không quá thấp một cách vô lý
-  const absoluteMinMaxFee = BigInt(
-    process.env.LINEA_ABSOLUTE_MIN_MAX_FEE_WEI || '100000000'
-  ) // 0.1 Gwei
+  // Đảm bảo maxFeePerGas không quá thấp
+  const absoluteMinMaxFee = ethers.parseUnits(
+    process.env.LINEA_ABSOLUTE_MIN_MAX_FEE_GWEI || '0.1',
+    'gwei'
+  ) // Ví dụ: ít nhất 0.1 Gwei
   if (txOptions.maxFeePerGas < absoluteMinMaxFee) {
     console.warn(
-      `Calculated maxFeePerGas (${txOptions.maxFeePerGas.toString()} Wei) is very low, adjusting to absolute minimum ${absoluteMinMaxFee.toString()} Wei.`
+      `Calculated maxFeePerGas (${txOptions.maxFeePerGas.toString()} Wei) is below absolute minimum. Adjusting to ${absoluteMinMaxFee.toString()} Wei.`
     )
     txOptions.maxFeePerGas = absoluteMinMaxFee
-    // Điều chỉnh lại maxPriorityFeePerGas nếu cần, đảm bảo nó không lớn hơn maxFeePerGas
+    // Đảm bảo tip vẫn hợp lệ so với maxFeePerGas mới
     if (txOptions.maxPriorityFeePerGas >= txOptions.maxFeePerGas) {
       txOptions.maxPriorityFeePerGas =
         txOptions.maxFeePerGas - currentBaseFee > BigInt(0)
           ? txOptions.maxFeePerGas - currentBaseFee
-          : BigInt(1) // Ít nhất là 1 Wei tip
+          : BigInt(1) // Tip ít nhất 1 Wei
       if (txOptions.maxPriorityFeePerGas <= BigInt(0))
         txOptions.maxPriorityFeePerGas = BigInt(1)
     }
   }
 
-  // Ghi đè bằng gasPrice nếu feeData chỉ có gasPrice (cho mạng legacy)
-  // Tuy nhiên, Linea là EIP-1559, nên nhánh này ít khi xảy ra nếu provider đúng.
-  if (
-    feeData.gasPrice &&
-    (!feeData.maxFeePerGas || !feeData.maxPriorityFeePerGas)
-  ) {
-    console.warn(
-      'FeeData suggests legacy transaction type or incomplete EIP-1559 data. Using gasPrice.'
-    )
-    txOptions.gasPrice = feeData.gasPrice
-    // Để an toàn, có thể cộng thêm một chút vào gasPrice nếu muốn
-    // txOptions.gasPrice = feeData.gasPrice + ethers.parseUnits('0.1', 'gwei');
-    delete txOptions.maxFeePerGas
-    delete txOptions.maxPriorityFeePerGas
-  }
-
-  console.log('Prepared Gas TxOptions:', {
-    maxFeePerGas: txOptions.maxFeePerGas
-      ? txOptions.maxFeePerGas.toString()
-      : 'N/A',
-    maxPriorityFeePerGas: txOptions.maxPriorityFeePerGas
-      ? txOptions.maxPriorityFeePerGas.toString()
-      : 'N/A',
-    gasPrice: txOptions.gasPrice ? txOptions.gasPrice.toString() : 'N/A'
+  console.log('Prepared EIP-1559 Gas TxOptions for Linea Sepolia:', {
+    maxFeePerGas: txOptions.maxFeePerGas.toString(),
+    maxPriorityFeePerGas: txOptions.maxPriorityFeePerGas.toString()
   })
   return txOptions
 }

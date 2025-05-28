@@ -16,3 +16,19 @@ module.exports = {
     tests: './test' // Thư mục chứa test
   }
 }
+
+// module.exports = {
+//   solidity: '0.8.28',
+//   networks: {
+//     sepolia: {
+//       url: process.env.ETHEREUM_RPC_URL, // Đọc URL từ .env
+//       accounts: process.env.SIGNER_PRIVATE_KEY
+//         ? [process.env.SIGNER_PRIVATE_KEY]
+//         : [] // Mảng chứa private key
+//     }
+//   },
+//   paths: {
+//     sources: './contracts', // Thư mục chứa contract
+//     tests: './test' // Thư mục chứa test
+//   }
+// }
