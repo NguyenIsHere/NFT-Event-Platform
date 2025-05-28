@@ -12,6 +12,7 @@ function ticketTypeToProto (ttDoc) {
     id: ttData.id || ttDoc._id?.toString(),
     event_id: ttData.eventId || '',
     session_id: ttData.sessionId || '', // Thêm session_id
+    contract_session_id: ttData.contractSessionId || '',
     blockchain_event_id: ttData.blockchainEventId || '',
     name: ttData.name || '',
     total_quantity: ttData.totalQuantity || 0,
@@ -32,25 +33,72 @@ async function CreateTicketType (call, callback) {
     `TicketTypeService: CreateTicketType called for event_id: ${event_id}, session_id: ${session_id}, name: ${name}`
   )
   try {
-    // TODO (Quan trọng): Xác minh event_id và session_id có hợp lệ không
-    // bằng cách gọi event-service.GetEvent({event_id})
-    // rồi kiểm tra xem event có session với session_id đó không.
-    // Ví dụ:
-    // const eventResponse = await new Promise((resolve, reject) => {
-    //     eventServiceClient.GetEvent({event_id}, (err, res) => err ? reject(err) : resolve(res));
-    // });
-    // if (!eventResponse || !eventResponse.event) {
-    //     return callback({ code: grpc.status.NOT_FOUND, message: "Parent event not found."});
-    // }
-    // const sessionExists = eventResponse.event.sessions.some(s => s.id === session_id);
-    // if (!sessionExists) {
-    //     return callback({ code: grpc.status.NOT_FOUND, message: `Session ${session_id} not found in event ${event_id}.`});
-    // }
-    // blockchain_event_id của TicketType sẽ được cập nhật sau khi event được publish
+    if (
+      !mongoose.Types.ObjectId.isValid(event_id) ||
+      !mongoose.Types.ObjectId.isValid(session_id)
+    ) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid event_id or session_id format.'
+      })
+    }
+
+    // 1. Gọi event-service để lấy thông tin Event và Session, bao gồm contract_session_id
+    console.log(
+      `TicketTypeService: Fetching event details from EventService for event ID: ${event_id}`
+    )
+    const eventResponse = await new Promise((resolve, reject) => {
+      eventServiceClient.GetEvent(
+        { event_id: event_id },
+        { deadline: new Date(Date.now() + 5000) },
+        (err, res) => {
+          if (err) {
+            console.error(
+              'TicketTypeService: Error calling GetEvent from EventService -',
+              err.details || err.message
+            )
+            return reject(err)
+          }
+          resolve(res)
+        }
+      )
+    })
+
+    if (!eventResponse || !eventResponse.event) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: `Parent event with ID ${event_id} not found.`
+      })
+    }
+
+    const parentEvent = eventResponse.event
+    // Tìm session tương ứng trong event để lấy contract_session_id
+    const targetSession = parentEvent.sessions.find(s => s.id === session_id) // s.id ở đây là MongoDB ObjectId của session
+    if (!targetSession) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: `Session ${session_id} not found in event ${event_id}.`
+      })
+    }
+    if (
+      !targetSession.contract_session_id &&
+      targetSession.contract_session_id !== '0'
+    ) {
+      // Cho phép contract_session_id là "0"
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: `contract_session_id not found for session ${session_id} in event ${event_id}. Ensure event sessions have contract_session_id.`
+      })
+    }
+    const contractSessionIdFromEvent = targetSession.contract_session_id
+    console.log(
+      `TicketTypeService: Found contract_session_id: ${contractSessionIdFromEvent} for session_id (Mongo): ${session_id}`
+    )
 
     const newTicketType = new TicketType({
       eventId: event_id,
       sessionId: session_id, // Lưu session_id
+      contractSessionId: contractSessionIdFromEvent, // Lưu ID số dùng cho contract
       // blockchainEventId: để trống, sẽ được cập nhật sau
       name,
       totalQuantity: total_quantity,

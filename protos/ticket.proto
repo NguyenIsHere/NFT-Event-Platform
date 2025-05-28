@@ -91,20 +91,22 @@ message Ticket {
 message TicketType {
   string id = 1;
   string event_id = 2;
-  string session_id = 3;
-  string blockchain_event_id = 4; // ID của Event cha trên Blockchain (uint256, string)
-  string name = 5;
-  int32 total_quantity = 6;
-  int32 available_quantity = 7;
-  string price_wei = 8;
-  int64 created_at = 9;
-  int64 updated_at = 10;
+  string session_id = 3; // mongoDB ObjectId
+ string contract_session_id = 4; // << THÊM: ID dạng số (string) của Session dùng cho contract
+  string blockchain_event_id = 5; // ID của Event cha trên Blockchain (uint256, string)
+  string name = 6;
+  int32 total_quantity = 7;
+  int32 available_quantity = 8;
+  string price_wei = 9;
+  int64 created_at = 10;
+  int64 updated_at = 11;
 }
 
 // _____ Request/Response Messages _____
 message CreateTicketTypeRequest { 
   string event_id = 1; 
   string session_id = 2; 
+  // string contract_session_id = 3; // << THÊM: ID dạng số (string) của Session dùng cho contract
   string name = 3; 
   int32 total_quantity = 4; 
   string price_wei = 5;
@@ -143,6 +145,7 @@ message InitiatePurchaseResponse {
   string price_to_pay_wei = 3;         // Số tiền cần thanh toán
   string blockchain_event_id = 4;      // ID sự kiện trên blockchain
   string session_id_for_contract = 5;  // Session ID cho contract
+  string token_uri_cid = 6; 
 }
 
 message ConfirmPaymentAndRequestMintRequest {

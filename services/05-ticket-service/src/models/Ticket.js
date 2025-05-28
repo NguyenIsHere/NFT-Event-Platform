@@ -8,6 +8,13 @@ const ticketTypeSchema = new Schema(
   {
     eventId: { type: String, required: true, index: true },
     sessionId: { type: String, required: true },
+    contractSessionId: {
+      // ID dạng số (lưu trữ dưới dạng string) của Session để dùng với Contract
+      type: String,
+      required: true, // Sẽ được lấy từ Event.Session.contractSessionId khi tạo TicketType
+      trim: true,
+      index: true // Có thể index nếu bạn query theo trường này
+    },
     blockchainEventId: { type: String, required: false, trim: true },
     name: { type: String, required: true, trim: true },
     totalQuantity: { type: Number, required: true },

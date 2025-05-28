@@ -51,9 +51,10 @@ message Event {
 
 message Session {
   string id = 1;                   // ID của session (Mongoose tự tạo, hoặc bạn có thể dùng UUID)
-  string name = 2;                 // Tên session
-  int64 start_time = 3;            // Unix timestamp (seconds or milliseconds)
-  int64 end_time = 4;              // Unix timestamp
+  string contract_session_id = 2;   // ID của session trên contract (uint256, dạng string, nếu có)
+  string name = 3;                 // Tên session
+  int64 start_time = 4;            // Unix timestamp (seconds or milliseconds)
+  int64 end_time = 5;              // Unix timestamp
 }
 
 message CreateEventRequest {
@@ -74,8 +75,9 @@ message CreateEventRequest {
 
 message SessionInput {
   string name = 1;
-  int64 start_time = 2;
-  int64 end_time = 3;
+  string contract_session_id = 2; // ID của session trên contract (uint256, dạng string, nếu có)
+  int64 start_time = 3;
+  int64 end_time = 4;
 }
 
 message EventResponse {

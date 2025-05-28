@@ -24,6 +24,7 @@ function eventToGrpcEvent (eventDoc) {
     sessions: eventJson.sessions
       ? eventJson.sessions.map(s => ({
           id: s.id,
+          contract_session_id: s.contractSessionId || '',
           name: s.name,
           start_time: s.startTime,
           end_time: s.endTime
@@ -90,11 +91,33 @@ async function CreateEvent (call, callback) {
       console.log(`EventService: Banner uploaded to IPFS, CID: ${bannerUrlCid}`)
     }
 
-    const mongooseSessions = sessions.map(s_in => ({
-      name: s_in.name,
-      startTime: Number(s_in.start_time),
-      endTime: Number(s_in.end_time)
-    }))
+    const mongooseSessions = sessions.map((s_in, index) => {
+      let contractSessionIdForDb = s_in.contract_session_id
+      if (!contractSessionIdForDb) {
+        contractSessionIdForDb = index.toString() // Ví dụ đơn giản: 0, 1, 2...
+        console.log(
+          `EventService: Assigning contract_session_id="${contractSessionIdForDb}" for session "${s_in.name}" as it was not provided.`
+        )
+      }
+      // Kiểm tra xem contractSessionIdForDb có phải là chuỗi số không
+      if (contractSessionIdForDb && !/^\d+$/.test(contractSessionIdForDb)) {
+        console.warn(
+          `EventService: Provided contract_session_id "${
+            s_in.contract_session_id
+          }" for session "${
+            s_in.name
+          }" is not a numeric string. Using index "${index.toString()}" instead.`
+        )
+        contractSessionIdForDb = index.toString()
+      }
+
+      return {
+        name: s_in.name,
+        startTime: Number(s_in.start_time),
+        endTime: Number(s_in.end_time),
+        contractSessionId: contractSessionIdForDb // << LƯU contract_session_id
+      }
+    })
 
     const newEvent = new Event({
       organizerId: organizer_id,

@@ -59,6 +59,13 @@ async function InitiatePurchase (call, callback) {
           'TicketType is not associated with a published blockchain event yet.'
       })
     }
+    if (!ticketType.contractSessionId && ticketType.contractSessionId !== '0') {
+      // Kiểm tra contractSessionId
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: 'TicketType is missing contract_session_id.'
+      })
+    }
     if (!buyer_address) {
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
@@ -136,9 +143,10 @@ async function InitiatePurchase (call, callback) {
         }
       )
     })
-    const tokenUriCidOnly = ipfsResponse.ipfs_hash // Chỉ CID (hash)
+    const tokenUriCidOnly = ipfsResponse.ipfs_hash // Đây là CID hash
+    const fullTokenUriForContract = `ipfs://${tokenUriCidOnly}` // Tạo URI đầy đủ
     console.log(
-      `TicketService: NFT metadata pinned to IPFS. CID: ${tokenUriCidOnly}`
+      `TicketService: NFT metadata pinned to IPFS. Token URI for contract: ${fullTokenUriForContract}`
     )
 
     // Tạo bản ghi Ticket trong DB với trạng thái PENDING_PAYMENT
@@ -148,7 +156,7 @@ async function InitiatePurchase (call, callback) {
       ownerAddress: buyer_address.toLowerCase(), // Lưu địa chỉ người mua tiềm năng
       sessionId: ticketType.sessionId,
       status: TICKET_STATUS_ENUM[0], // PENDING_PAYMENT (Giả sử enum PENDING_PAYMENT là index 0)
-      tokenUriCid: tokenUriCidOnly // Lưu CID của metadata (không có ipfs://)
+      tokenUriCid: fullTokenUriForContract // Lưu CID của metadata (không có ipfs://)
       // transactionHash và tokenId sẽ được cập nhật sau
     })
     const savedTicketOrder = await newTicketOrder.save()
@@ -176,8 +184,8 @@ async function InitiatePurchase (call, callback) {
       payment_contract_address: paymentDetails.payment_contract_address,
       price_to_pay_wei: paymentDetails.price_to_pay_wei,
       blockchain_event_id: ticketType.blockchainEventId.toString(),
-      session_id_for_contract: ticketType.sessionId || '0'
-      // Không trả token_uri_cid cho client nữa, vì backend sẽ dùng nó để mint
+      session_id_for_contract: ticketType.contractSessionId.toString(),
+      token_uri_cid: savedTicketOrder.tokenUriCid
     })
   } catch (error) {
     console.error(
@@ -244,9 +252,13 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
     const ticketType = await TicketType.findById(
       ticketOrder.ticketTypeId
     ).lean()
-    if (!ticketType) {
+    if (
+      !ticketType ||
+      !ticketType.blockchainEventId ||
+      (!ticketType.contractSessionId && ticketType.contractSessionId !== '0')
+    ) {
       throw new Error(
-        `TicketType ${ticketOrder.ticketTypeId} not found for ticket order ${ticketOrder.id}`
+        `TicketType ${ticketOrder.ticketTypeId} is missing blockchainEventId or contractSessionId.`
       )
     }
 
@@ -262,7 +274,8 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
           buyer_address: ticketOrder.ownerAddress,
           token_uri_cid: fullTokenUriForContract, // URI đầy đủ
           blockchain_event_id: ticketType.blockchainEventId.toString(),
-          session_id_for_contract: ticketType.sessionId || '0'
+          session_id_for_contract:
+            ticketType.contractSessionId.toString() || '0'
         },
         { deadline: new Date(Date.now() + 60000) }, // Timeout dài cho minting
         (err, response) => {
