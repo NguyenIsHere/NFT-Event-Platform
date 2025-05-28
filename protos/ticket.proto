@@ -28,7 +28,7 @@ service TicketTypeService {
   
   rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse) {
     option (google.api.http) = {
-      get: "/v1/ticket-types/by_event/{event_id}"  // THAY ĐỔI PATH
+      get: "/v1/ticket-types/by-event/{event_id}"  // THAY ĐỔI PATH
     };
   }
   

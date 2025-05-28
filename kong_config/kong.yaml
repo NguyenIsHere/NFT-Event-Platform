@@ -1,5 +1,5 @@
 _format_version: "3.0"
-_comment: "Kong declarative configuration with regex paths and priority"
+_comment: "Kong declarative configuration with regex paths"
 
 consumers:
   - username: generic-app-user
@@ -65,19 +65,19 @@ routes:
     paths: ["~/v1/auth/login$"] # Regex: khớp chính xác /v1/auth/login
     methods: [POST]
     strip_path: false
-    priority: 10
+
   - name: auth-register-route-v1
     service: auth-grpc-service
     paths: ["~/v1/auth/register$"] # Regex: khớp chính xác /v1/auth/register
     methods: [POST]
     strip_path: false
-    priority: 10
+
   - name: auth-refresh-token-route-v1
     service: auth-grpc-service
     paths: ["~/v1/auth/refresh-token$"] # Regex: khớp chính xác /v1/auth/refresh-token
     methods: [POST]
     strip_path: false
-    priority: 10
+
 
   # === User Service Routes ===
   # Ưu tiên các path cụ thể hơn (by-email, by-wallet) trước path có tham số chung (user_id)
@@ -86,7 +86,7 @@ routes:
     paths: ["~/v1/users/by-email$"] # Regex: khớp chính xác, query param sẽ được grpc-gateway xử lý
     methods: [GET]
     strip_path: false
-    priority: 20 # Ưu tiên cao hơn route user_id
+ # Ưu tiên cao hơn route user_id
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
@@ -96,7 +96,7 @@ routes:
     paths: ["~/v1/users/by-wallet/(?<wallet_address>[^/]+)$"] 
     methods: [GET]
     strip_path: false
-    priority: 20 # Ưu tiên cao hơn route user_id
+ # Ưu tiên cao hơn route user_id
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
@@ -106,7 +106,7 @@ routes:
     paths: ["~/v1/users/(?<user_id>[^/]+)$"] 
     methods: [GET]
     strip_path: false
-    priority: 10 # Ưu tiên thấp hơn các route GET cụ thể của user
+ # Ưu tiên thấp hơn các route GET cụ thể của user
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
@@ -117,13 +117,13 @@ routes:
     paths: ["~/v1/ipfs/pin_file$"]
     methods: [POST]
     strip_path: false
-    priority: 0
+
   - name: ipfs-pin-json-route-v1
     service: ipfs-grpc-service
     paths: ["~/v1/ipfs/pin_json$"]
     methods: [POST]
     strip_path: false
-    priority: 0
+
 
   # === Event Service Routes ===
   # Ưu tiên path cụ thể {event_id}/publish trước path chung {event_id} cho GET
@@ -132,25 +132,25 @@ routes:
     paths: ["~/v1/events/(?<event_id>[^/]+)/publish$"]
     methods: [POST]
     strip_path: false
-    priority: 20
+
   - name: event-create-route-v1 # POST /v1/events
     service: event-grpc-service
     paths: ["~/v1/events$"] # Khớp chính xác /v1/events cho POST
     methods: [POST]
     strip_path: false
-    priority: 10 
+ 
   - name: event-get-by-id-route-v1 # GET /v1/events/{event_id}
     service: event-grpc-service
     paths: ["~/v1/events/(?<event_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
-    priority: 5 # Thấp hơn POST /v1/events và GET /v1/events (list)
+ # Thấp hơn POST /v1/events và GET /v1/events (list)
   - name: event-list-route-v1 # GET /v1/events
     service: event-grpc-service
     paths: ["~/v1/events$"] # Khớp chính xác /v1/events cho GET
     methods: [GET]
     strip_path: false
-    priority: 10 
+ 
 
   # === Ticket & TicketType Service Routes ===
   # TicketTypeService Routes - ưu tiên các path có nhiều segment hơn hoặc cụ thể hơn
@@ -159,31 +159,31 @@ routes:
     paths: ["~/v1/ticket-types/create$"] # Path đã sửa theo proto của bạn
     methods: [POST]
     strip_path: false
-    priority: 30
+
   - name: tickettype-list-by-session-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/ticket-types/by-session/(?<event_id>[^/]+)/(?<session_id>[^/]+)$"] # Path đã sửa
     methods: [GET]
     strip_path: false
-    priority: 25
+
   - name: tickettype-list-by-event-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/ticket-types/by-event/(?<event_id>[^/]+)$"] # Path đã sửa
     methods: [GET]
     strip_path: false
-    priority: 20
+
   - name: tickettype-update-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/ticket-types/(?<ticket_type_id>[^/]+)$"]
     methods: [PUT]
     strip_path: false
-    priority: 15
+
   - name: tickettype-get-by-id-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/ticket-types/(?<ticket_type_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
-    priority: 10
+
   
   # TicketService Routes
   - name: ticket-initiate-purchase-route-v1
@@ -191,28 +191,27 @@ routes:
     paths: ["~/v1/tickets/initiate-purchase$"]
     methods: [POST]
     strip_path: false
-    priority: 30
+
   - name: ticket-confirm-payment-mint-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/confirm-payment-mint$"]
     methods: [POST]
     strip_path: false
-    priority: 30
+
   - name: ticket-list-by-owner-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/by-owner/(?<owner_address>[^/]+)$"] # Path đã sửa
     methods: [GET]
     strip_path: false
-    priority: 25
+
   - name: ticket-list-by-event-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/by-event/(?<event_id>[^/]+)$"] # Path đã sửa
     methods: [GET]
     strip_path: false
-    priority: 20
+
   - name: ticket-get-by-id-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/(?<ticket_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
-    priority: 10
