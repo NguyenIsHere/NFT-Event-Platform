@@ -54,6 +54,15 @@ services:
       - name: grpc-gateway
         config:
           proto: /etc/kong/protos/ticket.proto
+  
+  - name: seatmap-grpc-service
+    host: seatmap-service.service.consul
+    port: 50057 # Port của seatmap-service
+    protocol: grpc
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /etc/kong/protos/seatmap.proto
 
 # --- Routes ---
 routes:
@@ -215,3 +224,58 @@ routes:
     paths: ["~/v1/tickets/(?<ticket_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
+
+  # === SeatMap Service Routes ===
+  # Lưu ý: event_id và seat_map_id thường là MongoDB ObjectId (24 ký tự hex)
+  # Regex [^/]+ sẽ khớp với bất kỳ ký tự nào trừ dấu /
+  # Bạn có thể làm regex chặt chẽ hơn nếu muốn, ví dụ: (?<event_id>[0-9a-f]{24})
+
+  # RPC CreateSeatMap(CreateSeatMapRequest) returns (SeatMapResponse)
+  # post: "/v1/events/{event_id}/seatmap"
+  - name: seatmap-create-for-event-route-v1
+    service: seatmap-grpc-service
+    paths: ["~/v1/events/(?<event_id>[^/]+)/seatmap$"]
+    methods: [POST]
+    strip_path: false
+
+  # RPC GetSeatMapByEvent(GetSeatMapByEventRequest) returns (SeatMapResponse)
+  # get: "/v1/events/{event_id}/seatmap"
+  - name: seatmap-get-by-event-route-v1
+    service: seatmap-grpc-service
+    paths: ["~/v1/events/(?<event_id>[^/]+)/seatmap$"]
+    methods: [GET]
+    strip_path: false
+
+  # RPC GetSeatMap(GetSeatMapRequest) returns (SeatMapResponse)
+  # get: "/v1/seatmaps/{seat_map_id}"
+  - name: seatmap-get-by-id-route-v1
+    service: seatmap-grpc-service
+    paths: ["~/v1/seatmaps/(?<seat_map_id>[^/]+)$"]
+    methods: [GET]
+    strip_path: false
+
+  # RPC UpdateSeatMap(UpdateSeatMapRequest) returns (SeatMapResponse)
+  # put: "/v1/seatmaps/{seat_map_id}"
+  - name: seatmap-update-route-v1
+    service: seatmap-grpc-service
+    paths: ["~/v1/seatmaps/(?<seat_map_id>[^/]+)$"]
+    methods: [PUT]
+    strip_path: false
+
+  # RPC DeleteSeatMap(DeleteSeatMapRequest) returns (google.protobuf.Empty)
+  # delete: "/v1/seatmaps/{seat_map_id}"
+  - name: seatmap-delete-route-v1
+    service: seatmap-grpc-service
+    paths: ["~/v1/seatmaps/(?<seat_map_id>[^/]+)$"]
+    methods: [DELETE]
+    strip_path: false
+
+  # RPC ListSeatMaps(ListSeatMapsRequest) returns (ListSeatMapsResponse)
+  # get: "/v1/seatmaps" (sẽ dùng query param ?event_id=...)
+  - name: seatmap-list-route-v1
+    service: seatmap-grpc-service
+    paths: ["~/v1/seatmaps$"] # Khớp chính xác /v1/seatmaps
+    methods: [GET]
+    strip_path: false
+
+

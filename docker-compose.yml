@@ -120,6 +120,26 @@ services:
       # user-service: # Nếu cần thông tin người mua lúc ticket-service khởi tạo
       #   condition: service_started
 
+  seatmap-service: # Service số 7
+    build:
+      context: .
+      dockerfile: ./services/07-seatmap-service/Dockerfile
+    container_name: seatmap_service
+    env_file:
+      - ./services/07-seatmap-service/.env
+    dns: ["172.23.0.2", "8.8.8.8", "1.1.1.1"]
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+      event-service:
+        condition: service_started # Chờ event-service container bắt đầu
+      # auth-service: # Nếu cần xác thực người mua lúc ticket-service khởi tạo
+      #   condition: service_started
+      # user-service: # Nếu cần thông tin người mua lúc ticket-service khởi tạo
+      #   condition: service_started
+
   kong-gateway-infra:
     image: kong:3.7
     container_name: kong_api_gateway_infra
@@ -163,6 +183,8 @@ services:
         condition: service_started # Chờ container ticket-service bắt đầu
       blockchain-service:
         condition: service_started # Chờ container blockchain-service bắt đầu
+      seatmap-service:
+        condition: service_started # Chờ container seatmap-service bắt đầu
 
 networks:
   microservices_network:

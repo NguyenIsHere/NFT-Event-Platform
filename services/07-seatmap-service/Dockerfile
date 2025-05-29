@@ -4,15 +4,18 @@ ENV NODE_ENV=production
 
 WORKDIR /usr/src/app
 
-COPY package*.json ./
+# Copy package.json và package-lock.json của seatmap-service
+COPY services/07-seatmap-service/package*.json ./
 
 # Cài đặt chỉ dependencies cho production
-# Ưu tiên dùng npm ci nếu có package-lock.json
 RUN npm ci --omit=dev
 
-COPY . .
+# Copy toàn bộ mã nguồn của seatmap-service
+COPY services/07-seatmap-service/. ./ 
 
-COPY ../../protos /usr/src/app/protos
+# Copy thư mục protos
+COPY protos /usr/src/app/protos
 
 EXPOSE 50057
+
 CMD [ "node", "src/server.js" ]
