@@ -147,4 +147,14 @@ Individual services are not directly exposed to the host machine by default (exc
 
 ---
 
-## Project Structure (Simplified)
+## Important Notes
+
+* **Service Dependencies**: The `depends_on` conditions in `docker-compose.yml` manage the startup order. Most services wait for Consul to be healthy, and services like `event-service` and `kong-gateway-infra` wait for their dependent services to be started.
+* **DNS Resolution**: Services within the Docker network use Consul (`172.23.0.2:8600`) for DNS resolution to discover each other. This is configured in the `dns` section of each service and also for Kong via `KONG_DNS_RESOLVER`.
+* **Health Checks**: Consul performs its own health check to determine if it's leading a cluster. Other services should ideally implement their own health check endpoints that Consul can query for robust health monitoring.
+* **Environment Configuration**: **Crucially, ensure all `.env` files are correctly set up for each service.** Missing or incorrect configurations are common sources of errors.
+* **Initial Startup**: On the first run, Docker will build the images for your services if they don't exist locally. This might take some time.
+
+---
+
+Happy Coding! 🚀
