@@ -376,6 +376,7 @@ async function ListEvents (call, callback) {
     if (status && EVENT_STATUS_ENUM.includes(status.toUpperCase())) {
       // Lọc theo status nếu có và hợp lệ
       query.status = status.toUpperCase()
+      console.log(`EventService: Filtering by status: ${status.toUpperCase()}`)
     } else if (status) {
       console.warn(
         `EventService: Invalid status filter provided: ${status}. Ignoring status filter.`
@@ -393,12 +394,14 @@ async function ListEvents (call, callback) {
       .limit(page_size)
     const totalEvents = await Event.countDocuments(query)
 
-    const grpcEvents = events.map(eventDoc => eventToGrpcEvent(eventDoc).event)
+    // FIX: Remove .event because eventToGrpcEvent already returns the event object
+    const grpcEvents = events.map(eventDoc => eventToGrpcEvent(eventDoc))
     const next_page_token_value =
       skip + grpcEvents.length < totalEvents
         ? (skip + page_size).toString()
         : ''
 
+    console.log(`EventService: Returning ${grpcEvents.length} events`)
     callback(null, {
       events: grpcEvents,
       next_page_token: next_page_token_value
