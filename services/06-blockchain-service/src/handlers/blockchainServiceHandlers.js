@@ -41,90 +41,6 @@ async function waitForTransaction (txResponse, confirmations = 1) {
   return receipt
 }
 
-// async function RegisterEventOnBlockchain (call, callback) {
-//   const {
-//     system_event_id_for_ref,
-//     blockchain_event_id,
-//     price_wei,
-//     total_supply
-//   } = call.request
-//   console.log(
-//     `RegisterEventOnBlockchain called for system_event_id: ${system_event_id_for_ref}, blockchain_event_id: ${blockchain_event_id}`
-//   )
-
-//   try {
-//     const eventIdBN = BigInt(blockchain_event_id)
-//     const priceWeiBN = BigInt(price_wei)
-//     const totalSupplyBN = BigInt(total_supply)
-
-//     // Lấy thông tin phí gas hiện tại từ mạng
-//     const feeData = await provider.getFeeData()
-//     console.log('Current fee data from network:', {
-//       gasPrice: feeData.gasPrice ? feeData.gasPrice.toString() : 'N/A',
-//       maxFeePerGas: feeData.maxFeePerGas
-//         ? feeData.maxFeePerGas.toString()
-//         : 'N/A',
-//       maxPriorityFeePerGas: feeData.maxPriorityFeePerGas
-//         ? feeData.maxPriorityFeePerGas.toString()
-//         : 'N/A'
-//     })
-
-//     // Tạo đối tượng options cho giao dịch để chỉ định gas
-//     const txOptions = {}
-//     if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
-//       txOptions.maxFeePerGas = feeData.maxFeePerGas
-//       txOptions.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas
-//       // Có thể tăng một chút để đảm bảo giao dịch được ưu tiên
-//       // txOptions.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas + ethers.parseUnits("1", "gwei");
-//       // txOptions.maxFeePerGas = feeData.maxFeePerGas + ethers.parseUnits("2", "gwei");
-//     } else if (feeData.gasPrice) {
-//       // Dùng cho mạng non-EIP-1559 (legacy)
-//       txOptions.gasPrice = feeData.gasPrice
-//       // txOptions.gasPrice = feeData.gasPrice + ethers.parseUnits("2", "gwei"); // Tăng một chút
-//     }
-//     // Nếu mạng yêu cầu cao hơn, bạn có thể cần hardcode một mức tối thiểu hoặc nhân thêm %
-//     // Ví dụ, cho Linea Sepolia, bạn có thể cần một maxPriorityFeePerGas cụ thể
-//     // if (txOptions.maxPriorityFeePerGas && txOptions.maxPriorityFeePerGas < ethers.parseUnits("0.01", "gwei")) {
-//     //    console.log("Adjusting maxPriorityFeePerGas to a minimum for Linea Sepolia");
-//     //    txOptions.maxPriorityFeePerGas = ethers.parseUnits("0.01", "gwei"); // Ví dụ: 0.01 Gwei
-//     // }
-
-//     console.log(
-//       `Calling contract.createEvent(${eventIdBN}, ${priceWeiBN}, ${totalSupplyBN}) with txOptions:`,
-//       txOptions
-//     )
-//     const tx = await eventTicketNFTContract.createEvent(
-//       eventIdBN,
-//       priceWeiBN,
-//       totalSupplyBN,
-//       txOptions // Truyền options gas vào đây
-//     )
-//     console.log(`Transaction sent for createEvent, hash: ${tx.hash}`)
-//     const receipt = await waitForTransaction(tx)
-
-//     callback(null, {
-//       success: true,
-//       transaction_hash: receipt.hash,
-//       actual_blockchain_event_id: blockchain_event_id
-//     })
-//   } catch (error) {
-//     console.error('RegisterEventOnBlockchain Error:', error)
-//     // Chi tiết lỗi từ ethers.js thường đã đủ rõ ràng
-//     let errorMessage = error.message || 'Failed to register event on blockchain'
-//     if (error.error && error.error.message) {
-//       // Lỗi từ node RPC thường nằm trong error.error
-//       errorMessage = error.error.message
-//     } else if (error.reason) {
-//       // Đôi khi ethers cung cấp error.reason
-//       errorMessage = error.reason
-//     }
-//     callback({
-//       code: grpc.status.INTERNAL,
-//       message: errorMessage
-//     })
-//   }
-// }
-
 // Hàm helper mới để chuẩn bị txOptions với logic gas linh hoạt
 async function prepareGasOptions () {
   const feeData = await provider.getFeeData()
@@ -148,16 +64,6 @@ async function prepareGasOptions () {
     feeData.lastBaseFeePerGas ||
     BigInt(process.env.LINEA_FALLBACK_BASE_FEE_WEI || '7')
 
-  // Đặt Max Priority Fee (Tip)
-  // Dựa trên giao dịch thành công của bạn (0.214 Gwei), có vẻ tip cao được ưu tiên.
-  // Tuy nhiên, có thể không cần cao đến vậy nếu base fee thực sự là 7 Wei.
-  // Hãy thử một mức tip hợp lý, ví dụ 0.05 Gwei đến 0.1 Gwei, có thể cấu hình qua .env
-  // 0.05 Gwei = 50,000,000 Wei
-  // 0.1  Gwei = 100,000,000 Wei
-  // Giao dịch thành công của bạn có tip ~0.21 Gwei, nhưng đó có thể là do provider.getFeeData() đã gợi ý như vậy.
-
-  // Nếu provider gợi ý maxPriorityFeePerGas và nó hợp lý (ví dụ > 0.001 Gwei), hãy dùng nó.
-  // Nếu không, đặt một giá trị mặc định.
   let priorityFeeToUse
   const minSensiblePriorityFee = ethers.parseUnits(
     process.env.LINEA_MIN_SENSIBLE_PRIORITY_FEE_GWEI || '0.01',
@@ -243,7 +149,7 @@ async function RegisterEventOnBlockchain (call, callback) {
       eventIdBN,
       priceWeiBN,
       totalSupplyBN,
-      txOptions // Truyền options gas vào đây
+      txOptions
     )
     console.log(`Transaction sent for createEvent, hash: ${tx.hash}`)
     const receipt = await waitForTransaction(tx)
@@ -251,7 +157,7 @@ async function RegisterEventOnBlockchain (call, callback) {
     callback(null, {
       success: true,
       transaction_hash: receipt.hash,
-      actual_blockchain_event_id: blockchain_event_id // Giả sử ID truyền vào là ID được dùng
+      actual_blockchain_event_id: blockchain_event_id
     })
   } catch (error) {
     console.error('RegisterEventOnBlockchain Error:', error)
@@ -274,15 +180,11 @@ async function GetTicketPaymentDetails (call, callback) {
     `GetTicketPaymentDetails called for blockchain_event_id: ${blockchain_event_id}`
   )
   try {
-    // Thông tin contract address là cố định
-    const paymentContractAddress = await eventTicketNFTContract.getAddress() // eventTicketNFTContract.address cho ethers v5
+    const paymentContractAddress = await eventTicketNFTContract.getAddress()
 
-    // Giá có thể lấy trực tiếp từ contract nếu đã đăng ký event
-    // hoặc dùng giá từ ticket_type nếu đó là giá cuối cùng
-    let priceToPayWei = price_wei_from_ticket_type // Mặc định dùng giá từ ticket type
+    let priceToPayWei = price_wei_from_ticket_type
 
     if (blockchain_event_id && BigInt(blockchain_event_id) > 0) {
-      // Kiểm tra xem có blockchain_event_id không
       try {
         const eventIdBN = BigInt(blockchain_event_id)
         const eventDetails = await eventTicketNFTContract.eventInfo(eventIdBN)
