@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package user;
 
-import "google/api/annotations.proto"; // <<< THÊM DÒNG NÀY
+import "google/api/annotations.proto"; 
 
 service UserService {
     rpc GetUserById (UserRequestById) returns (UserResponse) {
@@ -32,8 +32,15 @@ service UserService {
         //     body: "*"
         // };
     }
+    rpc AuthenticateUser (AuthenticateUserRequest) returns (UserResponse) {
     // AuthenticateUser cũng thường không expose trực tiếp qua REST
-    // mà được AuthService.Login gọi nội bộ.
+    // mà được AuthService.Login gọi nội bộ qua gRPC.
+    // Nếu muốn expose, bạn có thể thêm:
+    // option (google.api.http) = {
+    //     post: "/v1/users/authenticate"
+    //     body: "*"
+    // };
+    }
 }
 
 message UserRequestById {

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose')
+const bcrypt = require('bcryptjs')
 const Schema = mongoose.Schema
 
 const userSchema = new Schema(
@@ -81,6 +82,3 @@ userSchema.set('toJSON', {
 
 const User = mongoose.model('User', userSchema)
 module.exports = User
-
-// Cần import bcryptjs ở đầu file nếu chưa có
-const bcrypt = require('bcryptjs')

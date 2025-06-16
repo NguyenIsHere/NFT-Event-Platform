@@ -178,31 +178,39 @@ async function CreateUser (call, callback) {
 }
 
 async function AuthenticateUser (call, callback) {
-  try {
-    const { email, password } = call.request
-    const user = await User.findOne({ email }) // Lấy cả password hash để so sánh
+  const { email, password } = call.request
+  console.log(`UserService: AuthenticateUser called for email: ${email}`)
 
+  try {
+    // Tìm user theo email
+    const user = await User.findOne({ email })
     if (!user) {
+      console.log(`UserService: User not found for email: ${email}`)
       return callback({
         code: grpc.status.NOT_FOUND,
         message: 'User not found'
       })
     }
 
-    const isMatch = await user.comparePassword(password)
-    if (!isMatch) {
+    // Kiểm tra password using comparePassword method from model
+    const isPasswordValid = await user.comparePassword(password)
+    if (!isPasswordValid) {
+      console.log(`UserService: Invalid password for email: ${email}`)
       return callback({
         code: grpc.status.UNAUTHENTICATED,
-        message: 'Invalid credentials'
+        message: 'Invalid password'
       })
     }
-    // Trả về thông tin user, không bao gồm password (Mongoose model đã xử lý)
+
+    console.log(`UserService: User authenticated successfully: ${user._id}`)
+
+    // Trả về thông tin user
     callback(null, userToUserResponse(user))
   } catch (error) {
-    console.error('AuthenticateUser Error:', error)
+    console.error('UserService: AuthenticateUser RPC error:', error)
     callback({
       code: grpc.status.INTERNAL,
-      message: 'Error authenticating user'
+      message: error.message || 'Failed to authenticate user.'
     })
   }
 }
