@@ -72,6 +72,19 @@ service TicketService {
       get: "/v1/tickets/by-owner/{owner_address}"  // THAY ĐỔI PATH
     };
   }
+
+  rpc GenerateQRCode (GenerateQRCodeRequest) returns (GenerateQRCodeResponse) {
+        option (google.api.http) = {
+            post: "/v1/tickets/{ticket_id}/qr-code"
+        };
+    }
+    
+  rpc CheckIn (CheckInRequest) returns (CheckInResponse) {
+      option (google.api.http) = {
+          post: "/v1/tickets/check-in"
+          body: "*"
+      };
+  }
 }
 
 // _____ Models _____
@@ -86,6 +99,13 @@ message Ticket {
   string token_uri_cid = 8;   // CID của metadata JSON (chỉ hash, không có ipfs://)
   string transaction_hash = 9; // Hash của giao dịch mint
   int64 created_at = 10;
+
+  string qr_code_data = 11;
+  string check_in_status = 12;
+  int64 check_in_time = 13;
+  string check_in_location = 14;
+  int64 expiry_time = 15;
+  string qr_code_image_url = 16;
 }
 
 message TicketType {
@@ -176,5 +196,29 @@ message ListTicketsByOwnerRequest {
 message ListTicketsResponse { 
   repeated Ticket tickets = 1; 
   string next_page_token = 2; 
+}
+
+// Thêm messages cho check-in
+message CheckInRequest {
+  string qr_code_data = 1;
+  string location = 2;
+  string scanner_id = 3; // ID của người/thiết bị scan
+}
+
+message CheckInResponse {
+  bool success = 1;
+  string message = 2;
+  Ticket ticket = 3;
+}
+
+message GenerateQRCodeRequest {
+  string ticket_id = 1;
+}
+
+message GenerateQRCodeResponse {
+  bool success = 1;
+  string message = 2;
+  string qr_code_data = 3;
+  string qr_code_image_base64 = 4;
 }
 

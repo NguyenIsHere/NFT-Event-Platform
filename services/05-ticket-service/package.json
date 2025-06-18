@@ -17,6 +17,7 @@
     "grpc-health-check": "^2.0.2",
     "mongoose": "^8.15.1",
     "os": "^0.1.2",
+    "qrcode": "^1.5.4",
     "uuid": "^11.1.0"
   }
 }

@@ -5,6 +5,11 @@ const mongoose = require('mongoose')
 const ipfsServiceClient = require('../clients/ipfsServiceClient')
 const blockchainServiceClient = require('../clients/blockchainServiceClient')
 const eventServiceClient = require('../clients/eventServiceClient')
+const {
+  generateQRCodeData,
+  verifyQRCodeData,
+  generateQRCodeImage
+} = require('../utils/qrCodeUtils')
 
 // Helper function ticketDocumentToGrpcTicket (giữ nguyên như trước)
 function ticketDocumentToGrpcTicket (ticketDoc) {
@@ -18,11 +23,24 @@ function ticketDocumentToGrpcTicket (ticketDoc) {
     owner_address: ticketJson.ownerAddress || '',
     session_id: ticketJson.sessionId || '',
     status: ticketJson.status || '',
-    token_uri_cid: ticketJson.tokenUriCid || '', // CID (hash) của metadata
+    token_uri_cid: ticketJson.tokenUriCid || '',
     transaction_hash: ticketJson.transactionHash || '',
     created_at: ticketDoc.createdAt
       ? Math.floor(new Date(ticketDoc.createdAt).getTime() / 1000)
-      : 0
+      : 0,
+    // Thêm QR code fields
+    qr_code_data: ticketJson.qrCodeData || '',
+    check_in_status: ticketJson.checkInStatus || 'NOT_CHECKED_IN',
+    check_in_time: ticketDoc.checkInTime
+      ? Math.floor(new Date(ticketDoc.checkInTime).getTime() / 1000)
+      : 0,
+    check_in_location: ticketJson.checkInLocation || '',
+    expiry_time: ticketDoc.expiryTime
+      ? Math.floor(new Date(ticketDoc.expiryTime).getTime() / 1000)
+      : 0,
+    qr_code_image_url: ticketJson.id
+      ? `/v1/tickets/${ticketJson.id}/qr-code/image`
+      : ''
   }
 }
 
@@ -285,102 +303,337 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
       )
     })
 
-    if (!mintResponse || !mintResponse.success) {
+    if (mintResponse && mintResponse.success) {
+      // Cập nhật ticket với thông tin mint
+      ticketOrder.tokenId = mintResponse.token_id
+      ticketOrder.transactionHash = mintResponse.transaction_hash
+      ticketOrder.status = TICKET_STATUS_ENUM[4] // MINTED
+
+      if (
+        ticketOrder.ownerAddress.toLowerCase() !==
+        mintResponse.owner_address.toLowerCase()
+      ) {
+        ticketOrder.ownerAddress = mintResponse.owner_address.toLowerCase()
+      }
+
+      const savedTicket = await ticketOrder.save()
+
+      // TẠO QR CODE NGAY SAU KHI MINT THÀNH CÔNG
+      try {
+        const qrCodeInfo = generateQRCodeData({
+          ticketId: savedTicket.id,
+          eventId: savedTicket.eventId,
+          ownerAddress: savedTicket.ownerAddress
+        })
+
+        const expiryTime = new Date()
+        expiryTime.setFullYear(expiryTime.getFullYear() + 1)
+
+        savedTicket.qrCodeData = qrCodeInfo.qrCodeData
+        savedTicket.qrCodeSecret = qrCodeInfo.qrCodeSecret
+        savedTicket.expiryTime = expiryTime
+
+        const finalSavedTicket = await savedTicket.save()
+
+        console.log(
+          `TicketService: QR code generated for ticket ${finalSavedTicket.id}`
+        )
+
+        // Giảm available quantity
+        if (ticketType.availableQuantity > 0) {
+          await TicketType.findByIdAndUpdate(ticketOrder.ticketTypeId, {
+            $inc: { availableQuantity: -1 }
+          })
+        }
+
+        callback(null, { ticket: ticketDocumentToGrpcTicket(finalSavedTicket) })
+      } catch (qrError) {
+        console.error('TicketService: QR code generation failed:', qrError)
+        // QR code generation failure shouldn't fail the mint
+        callback(null, { ticket: ticketDocumentToGrpcTicket(savedTicket) })
+      }
+    } else {
       ticketOrder.status = TICKET_STATUS_ENUM[5] // FAILED_MINT
       await ticketOrder.save()
-      console.error(
-        'TicketService: MintTicket call to BlockchainService failed:',
-        mintResponse
-      )
       throw new Error(
         mintResponse.message || 'Failed to mint NFT via BlockchainService.'
       )
     }
-
-    // 4. Cập nhật thông tin vé trong DB với kết quả từ mint
-    ticketOrder.tokenId = mintResponse.token_id
-    ticketOrder.transactionHash = mintResponse.transaction_hash // Hash của giao dịch MINT
-    ticketOrder.status = TICKET_STATUS_ENUM[4] // MINTED
-    // ownerAddress đã được set khi InitiatePurchase, và mintResponse.owner_address nên khớp
-    if (
-      ticketOrder.ownerAddress.toLowerCase() !==
-      mintResponse.owner_address.toLowerCase()
-    ) {
-      console.warn(
-        `TicketService: Minted owner ${mintResponse.owner_address} differs from expected buyer ${ticketOrder.ownerAddress} for order ${ticketOrder.id}. Updating to actual minted owner.`
-      )
-      ticketOrder.ownerAddress = mintResponse.owner_address.toLowerCase()
-    }
-    const savedTicket = await ticketOrder.save()
-    console.log(
-      `TicketService: Ticket ${savedTicket.id} MINTED successfully. TokenId: ${savedTicket.tokenId}, TxHash: ${savedTicket.transactionHash}`
-    )
-
-    // 5. Giảm số lượng vé còn lại của TicketType
-    // (Đã giảm ở Prepare, hoặc cần cơ chế lock/release nếu Prepare không trừ ngay)
-    // Nếu bạn chưa trừ ở Prepare, thì trừ ở đây:
-    if (ticketType.availableQuantity > 0) {
-      // Double check
-      await TicketType.findByIdAndUpdate(ticketOrder.ticketTypeId, {
-        $inc: { availableQuantity: -1 }
-      })
-      console.log(
-        `TicketService: Decremented available quantity for TicketType ${ticketOrder.ticketTypeId}`
-      )
-    } else {
-      console.warn(
-        `TicketService: TicketType ${ticketOrder.ticketTypeId} available quantity was already 0 or less when mint confirmed.`
-      )
-    }
-
-    callback(null, { ticket: ticketDocumentToGrpcTicket(savedTicket) })
   } catch (error) {
     console.error(
       'TicketService: ConfirmPaymentAndRequestMint RPC error:',
-      error.details || error.message || error
+      error
     )
-    if (ticket_order_id && mongoose.Types.ObjectId.isValid(ticket_order_id)) {
-      try {
-        // Cố gắng cập nhật trạng thái vé về FAILED_MINT nếu có lỗi
-        await Ticket.findByIdAndUpdate(ticket_order_id, {
-          status: TICKET_STATUS_ENUM[5] /* FAILED_MINT */
-        })
-      } catch (statusUpdateError) {
-        console.error(
-          `TicketService: Could not update ticket order ${ticket_order_id} status to FAILED_MINT:`,
-          statusUpdateError
-        )
-      }
-    }
-    let grpcErrorCode = grpc.status.INTERNAL
-    if (error.code && Object.values(grpc.status).includes(error.code)) {
-      grpcErrorCode = error.code
-    }
     callback({
-      code: grpcErrorCode,
-      message:
-        error.details ||
-        error.message ||
-        'Failed to confirm payment and request mint.'
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to confirm payment and mint ticket.'
     })
   }
 }
 
-// ... (GetTicket, ListTicketsByEvent, ListTicketsByOwner giữ nguyên như trước) ...
-// async function GetTicket (call, callback) {
-//   /* ... */
-// }
-// async function ListTicketsByEvent (call, callback) {
-//   /* ... */
-// }
-// async function ListTicketsByOwner (call, callback) {
-//   /* ... */
-// }
+async function GenerateQRCode (call, callback) {
+  const { ticket_id } = call.request
+
+  console.log(`TicketService: GenerateQRCode called for ticket: ${ticket_id}`)
+
+  try {
+    // Tìm ticket
+    const ticket = await Ticket.findById(ticket_id)
+    if (!ticket) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Ticket not found'
+      })
+    }
+
+    // Kiểm tra ticket status
+    if (ticket.status !== TICKET_STATUS_ENUM[4]) {
+      // MINTED
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: 'Ticket must be minted before generating QR code'
+      })
+    }
+
+    // Tạo QR code nếu chưa có
+    if (!ticket.qrCodeData) {
+      const qrCodeInfo = generateQRCodeData({
+        ticketId: ticket.id,
+        eventId: ticket.eventId,
+        ownerAddress: ticket.ownerAddress
+      })
+
+      const expiryTime = new Date()
+      expiryTime.setFullYear(expiryTime.getFullYear() + 1)
+
+      ticket.qrCodeData = qrCodeInfo.qrCodeData
+      ticket.qrCodeSecret = qrCodeInfo.qrCodeSecret
+      ticket.expiryTime = expiryTime
+
+      await ticket.save()
+    }
+
+    // Tạo QR code image
+    const qrCodeImageBase64 = await generateQRCodeImage(ticket.qrCodeData)
+
+    callback(null, {
+      success: true,
+      message: 'QR code generated successfully',
+      qr_code_data: ticket.qrCodeData,
+      qr_code_image_base64: qrCodeImageBase64
+    })
+  } catch (error) {
+    console.error('TicketService: GenerateQRCode error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to generate QR code'
+    })
+  }
+}
+
+// Thêm handler cho CheckIn
+async function CheckIn (call, callback) {
+  const { qr_code_data, location, scanner_id } = call.request
+
+  console.log(`TicketService: CheckIn called with scanner: ${scanner_id}`)
+
+  try {
+    // Parse QR code data
+    let qrData
+    try {
+      qrData = JSON.parse(qr_code_data)
+    } catch (error) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid QR code format'
+      })
+    }
+
+    // Tìm ticket bằng QR code data
+    const ticket = await Ticket.findOne({ qrCodeData: qr_code_data })
+    if (!ticket) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Ticket not found or QR code invalid'
+      })
+    }
+
+    // Verify QR code signature
+    const verification = verifyQRCodeData(qr_code_data, ticket.qrCodeSecret)
+    if (!verification.valid) {
+      return callback({
+        code: grpc.status.UNAUTHENTICATED,
+        message: `QR code verification failed: ${verification.reason}`
+      })
+    }
+
+    // Kiểm tra ticket status
+    if (ticket.status !== TICKET_STATUS_ENUM[4]) {
+      // MINTED
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: 'Ticket is not valid for check-in'
+      })
+    }
+
+    // Kiểm tra expiry
+    if (ticket.expiryTime && new Date() > ticket.expiryTime) {
+      ticket.checkInStatus = 'EXPIRED'
+      await ticket.save()
+
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: 'Ticket has expired'
+      })
+    }
+
+    // Kiểm tra đã check-in chưa
+    if (ticket.checkInStatus === 'CHECKED_IN') {
+      return callback({
+        code: grpc.status.ALREADY_EXISTS,
+        message: `Ticket already checked in at ${ticket.checkInTime} (${ticket.checkInLocation})`
+      })
+    }
+
+    // Thực hiện check-in
+    ticket.checkInStatus = 'CHECKED_IN'
+    ticket.checkInTime = new Date()
+    ticket.checkInLocation = location || 'Unknown'
+
+    await ticket.save()
+
+    console.log(`TicketService: Ticket ${ticket.id} checked in successfully`)
+
+    callback(null, {
+      success: true,
+      message: 'Check-in successful',
+      ticket: ticketDocumentToGrpcTicket(ticket)
+    })
+  } catch (error) {
+    console.error('TicketService: CheckIn error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Check-in failed'
+    })
+  }
+}
+
+async function GetTicket (call, callback) {
+  const { ticket_id } = call.request
+  console.log(`TicketService: GetTicket called for ID: ${ticket_id}`)
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(ticket_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid ticket ID format.'
+      })
+    }
+
+    const ticket = await Ticket.findById(ticket_id)
+    if (!ticket) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Ticket not found.'
+      })
+    }
+
+    callback(null, ticketDocumentToGrpcTicket(ticket))
+  } catch (error) {
+    console.error('TicketService: GetTicket RPC error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to get ticket.'
+    })
+  }
+}
+
+async function ListTicketsByEvent (call, callback) {
+  const { event_id, page_size = 10, page_token } = call.request
+  console.log(`TicketService: ListTicketsByEvent called for event: ${event_id}`)
+
+  try {
+    const query = { eventId: event_id }
+    const limit = Math.min(page_size, 100)
+    let skip = 0
+
+    if (page_token) {
+      try {
+        skip = parseInt(page_token)
+      } catch (e) {
+        skip = 0
+      }
+    }
+
+    const tickets = await Ticket.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit + 1)
+
+    const hasMore = tickets.length > limit
+    const ticketsToReturn = hasMore ? tickets.slice(0, limit) : tickets
+    const nextPageToken = hasMore ? (skip + limit).toString() : ''
+
+    callback(null, {
+      tickets: ticketsToReturn.map(ticketDocumentToGrpcTicket),
+      next_page_token: nextPageToken
+    })
+  } catch (error) {
+    console.error('TicketService: ListTicketsByEvent RPC error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to list tickets.'
+    })
+  }
+}
+
+async function ListTicketsByOwner (call, callback) {
+  const { owner_address, page_size = 10, page_token } = call.request
+  console.log(
+    `TicketService: ListTicketsByOwner called for owner: ${owner_address}`
+  )
+
+  try {
+    const query = { ownerAddress: owner_address.toLowerCase() }
+    const limit = Math.min(page_size, 100)
+    let skip = 0
+
+    if (page_token) {
+      try {
+        skip = parseInt(page_token)
+      } catch (e) {
+        skip = 0
+      }
+    }
+
+    const tickets = await Ticket.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit + 1)
+
+    const hasMore = tickets.length > limit
+    const ticketsToReturn = hasMore ? tickets.slice(0, limit) : tickets
+    const nextPageToken = hasMore ? (skip + limit).toString() : ''
+
+    callback(null, {
+      tickets: ticketsToReturn.map(ticketDocumentToGrpcTicket),
+      next_page_token: nextPageToken
+    })
+  } catch (error) {
+    console.error('TicketService: ListTicketsByOwner RPC error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to list tickets.'
+    })
+  }
+}
 
 module.exports = {
   InitiatePurchase,
-  ConfirmPaymentAndRequestMint
-  // GetTicket,
-  // ListTicketsByEvent,
-  // ListTicketsByOwner
+  ConfirmPaymentAndRequestMint,
+  GenerateQRCode,
+  CheckIn,
+  GetTicket,
+  ListTicketsByEvent,
+  ListTicketsByOwner
 }

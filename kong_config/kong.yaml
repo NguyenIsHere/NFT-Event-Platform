@@ -225,6 +225,32 @@ routes:
     methods: [GET]
     strip_path: false
 
+# QR Code routes for ticket service
+  - name: ticket-generate-qr-code-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/tickets/(?<ticket_id>[^/]+)/qr-code$"]
+    methods: [POST]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: ticket-qr-code-image-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/tickets/(?<ticket_id>[^/]+)/qr-code/image$"]
+    methods: [GET]
+    strip_path: false
+    # Không cần JWT cho image endpoint
+
+  - name: ticket-check-in-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/tickets/check-in$"]
+    methods: [POST]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
   # === SeatMap Service Routes ===
   # Lưu ý: event_id và seat_map_id thường là MongoDB ObjectId (24 ký tự hex)
   # Regex [^/]+ sẽ khớp với bất kỳ ký tự nào trừ dấu /

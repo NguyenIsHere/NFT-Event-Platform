@@ -42,12 +42,12 @@ const TicketType = mongoose.model('TicketType', ticketTypeSchema)
 
 // Ticket Schema
 const TICKET_STATUS_ENUM = [
-  'AVAILABLE',
-  'SOLD',
-  'USED',
-  'PENDING_MINT',
-  'MINTED',
-  'CANCELLED'
+  'PENDING_PAYMENT', // 0
+  'PAID', // 1
+  'MINTING', // 2
+  'MINT_FAILED', // 3
+  'MINTED', // 4
+  'FAILED_MINT' // 5
 ]
 const ticketSchema = new Schema(
   {
@@ -56,18 +56,51 @@ const ticketSchema = new Schema(
     tokenId: { type: String, unique: true, sparse: true, trim: true },
     ownerAddress: { type: String, trim: true, lowercase: true, index: true },
     sessionId: { type: String, required: true },
-    status: { type: String, enum: TICKET_STATUS_ENUM, default: 'AVAILABLE' },
+    status: {
+      type: String,
+      enum: TICKET_STATUS_ENUM,
+      default: 'PENDING_PAYMENT'
+    },
     tokenUriCid: { type: String, required: false },
-    transactionHash: { type: String, required: false }
+    transactionHash: { type: String, required: false },
+    qrCodeData: {
+      type: String,
+      required: false,
+      unique: true, // Đảm bảo mỗi QR code là duy nhất,
+      sparse: true,
+      index: true
+    },
+    qrCodeSecret: {
+      type: String,
+      required: false
+    },
+    checkInStatus: {
+      type: String,
+      enum: ['NOT_CHECKED_IN', 'CHECKED_IN', 'EXPIRED'],
+      default: 'NOT_CHECKED_IN',
+      index: true
+    },
+    checkInTime: {
+      type: Date,
+      default: null
+    },
+    checkInLocation: {
+      type: String,
+      default: ''
+    },
+    expiryTime: {
+      type: Date,
+      required: false
+    }
   },
   {
     timestamps: true,
     toJSON: {
       virtuals: true,
       transform: (doc, ret) => {
-        ret.id = ret._id.toString()
         delete ret._id
         delete ret.__v
+        delete ret.qrCodeSecret
         return ret
       }
     }
