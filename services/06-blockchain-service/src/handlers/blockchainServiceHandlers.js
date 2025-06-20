@@ -330,6 +330,32 @@ async function VerifyTransaction (call, callback) {
   const { transaction_hash } = call.request
   console.log(`VerifyTransaction called for hash: ${transaction_hash}`)
   try {
+    // ✅ VALIDATE transaction hash format
+    if (!transaction_hash || typeof transaction_hash !== 'string') {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Transaction hash is required and must be a string'
+      })
+    }
+
+    if (transaction_hash.length !== 66 || !transaction_hash.startsWith('0x')) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message:
+          'Transaction hash must be a valid hex string (66 characters, starting with 0x)'
+      })
+    }
+
+    const hexPattern = /^0x[0-9a-fA-F]{64}$/
+    if (!hexPattern.test(transaction_hash)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Transaction hash contains invalid hex characters'
+      })
+    }
+
+    console.log(`Getting transaction for valid hash: ${transaction_hash}`)
+
     const tx = await provider.getTransaction(transaction_hash)
     if (!tx) {
       return callback({
@@ -351,16 +377,44 @@ async function VerifyTransaction (call, callback) {
       })
     }
 
+    // ✅ FIX: Check confirmation properly for Ethers v6
+    const currentBlockNumber = await provider.getBlockNumber()
+    const confirmations = currentBlockNumber - receipt.blockNumber
+    const minConfirmations = 1 // Require at least 1 confirmation
+
+    const isConfirmed = confirmations >= minConfirmations
+    const isSuccessful = receipt.status === 1
+
+    console.log(`✅ Transaction verification details:`, {
+      txHash: transaction_hash,
+      blockNumber: receipt.blockNumber,
+      currentBlockNumber,
+      confirmations,
+      minConfirmations,
+      isConfirmed,
+      isSuccessful,
+      status: receipt.status
+    })
+
     callback(null, {
-      is_confirmed: receipt.confirmations > 0, // Hoặc dùng receipt.isMined() cho ethers v6
-      success_on_chain: receipt.status === 1,
-      from_address: receipt.from,
-      to_address: receipt.to,
-      value_wei: tx.value.toString(), // Lấy value từ tx gốc
-      block_number: BigInt(receipt.blockNumber) // receipt.blockNumber là number
+      is_confirmed: isConfirmed,
+      success_on_chain: isSuccessful,
+      from_address: receipt.from || tx.from || '',
+      to_address: receipt.to || tx.to || '',
+      value_wei: tx.value ? tx.value.toString() : '0',
+      block_number: Number(receipt.blockNumber) || 0
     })
   } catch (error) {
     console.error('VerifyTransaction Error:', error)
+
+    if (error.code === 'UNKNOWN_ERROR' && error.error?.code === -32602) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message:
+          'Invalid transaction hash format - must be 64 hex characters with 0x prefix'
+      })
+    }
+
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to verify transaction'

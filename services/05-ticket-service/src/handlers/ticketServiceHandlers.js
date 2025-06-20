@@ -371,48 +371,130 @@ async function InitiatePurchase (call, callback) {
 //   }
 // }
 
-// ticketServiceHandlers.js - ConfirmPaymentAndRequestMint
+// ticketServiceHandlers.js - ConfirmPaymentAndRequestMint với validation
 async function ConfirmPaymentAndRequestMint (call, callback) {
-  const { ticket_order_id, payment_transaction_hash } = call.request
+  const { ticket_order_id, payment_transaction_hash, owner_address } =
+    call.request
+
+  console.log(`🎯 ConfirmPaymentAndRequestMint called:`, {
+    ticket_order_id,
+    payment_transaction_hash,
+    owner_address,
+    hash_length: payment_transaction_hash?.length,
+    hash_valid: payment_transaction_hash?.startsWith('0x')
+  })
 
   try {
+    // ✅ VALIDATE inputs
+    if (!ticket_order_id || !mongoose.Types.ObjectId.isValid(ticket_order_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid ticket_order_id format'
+      })
+    }
+
+    if (
+      !payment_transaction_hash ||
+      typeof payment_transaction_hash !== 'string'
+    ) {
+      console.error(
+        '❌ Invalid payment_transaction_hash:',
+        typeof payment_transaction_hash,
+        payment_transaction_hash
+      )
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'payment_transaction_hash is required and must be a string'
+      })
+    }
+
+    if (payment_transaction_hash.length !== 66) {
+      console.error('❌ Invalid hash length:', payment_transaction_hash.length)
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: `payment_transaction_hash must be 66 characters, got ${payment_transaction_hash.length}`
+      })
+    }
+
+    if (!payment_transaction_hash.startsWith('0x')) {
+      console.error('❌ Invalid hash format:', payment_transaction_hash)
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'payment_transaction_hash must start with 0x'
+      })
+    }
+
+    const hexPattern = /^0x[0-9a-fA-F]{64}$/
+    if (!hexPattern.test(payment_transaction_hash)) {
+      console.error('❌ Invalid hex pattern:', payment_transaction_hash)
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'payment_transaction_hash contains invalid hex characters'
+      })
+    }
+
+    console.log(
+      '✅ Input validation passed for hash:',
+      payment_transaction_hash
+    )
+
     const ticketOrder = await Ticket.findById(ticket_order_id)
     if (!ticketOrder) {
       return callback({
         code: grpc.status.NOT_FOUND,
-        message: 'Ticket order not found.'
+        message: 'Ticket order not found'
       })
     }
 
-    // VERIFY TRANSACTION thay vì mint riêng
+    if (ticketOrder.status !== TICKET_STATUS_ENUM[0]) {
+      // PENDING_PAYMENT
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: `Ticket order status is ${ticketOrder.status}, expected PENDING_PAYMENT`
+      })
+    }
+
+    console.log(`🔍 Verifying transaction: ${payment_transaction_hash}`)
+
+    // VERIFY TRANSACTION
     const verifyResponse = await new Promise((resolve, reject) => {
       blockchainServiceClient.VerifyTransaction(
         { transaction_hash: payment_transaction_hash },
-        { deadline: new Date(Date.now() + 10000) },
+        { deadline: new Date(Date.now() + 15000) }, // Longer timeout
         (err, response) => {
-          if (err) return reject(err)
+          if (err) {
+            console.error('❌ VerifyTransaction gRPC error:', err)
+            return reject(err)
+          }
+          console.log('✅ VerifyTransaction response:', response)
           resolve(response)
         }
       )
     })
 
     if (!verifyResponse.is_confirmed || !verifyResponse.success_on_chain) {
+      console.error('❌ Transaction verification failed:', verifyResponse)
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
-        message: 'Transaction not confirmed or failed on-chain'
+        message: `Transaction not confirmed or failed. Status: confirmed=${verifyResponse.is_confirmed}, success=${verifyResponse.success_on_chain}`
       })
     }
 
-    // Parse transaction logs để lấy tokenId từ TicketMinted event
+    console.log(`✅ Transaction verified successfully. Parsing logs...`)
+
+    // Parse transaction logs để lấy tokenId
     let mintedTokenId = '0'
     try {
-      // Gọi blockchain service để parse logs
       const parseLogsResponse = await new Promise((resolve, reject) => {
         blockchainServiceClient.ParseTransactionLogs(
           { transaction_hash: payment_transaction_hash },
-          { deadline: new Date(Date.now() + 5000) },
+          { deadline: new Date(Date.now() + 10000) },
           (err, response) => {
-            if (err) return reject(err)
+            if (err) {
+              console.warn('⚠️ ParseTransactionLogs gRPC error:', err.message)
+              return reject(err)
+            }
+            console.log('✅ ParseTransactionLogs response:', response)
             resolve(response)
           }
         )
@@ -420,9 +502,11 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
 
       if (parseLogsResponse.minted_token_id) {
         mintedTokenId = parseLogsResponse.minted_token_id
+        console.log(`🎯 Parsed tokenId from logs: ${mintedTokenId}`)
       }
     } catch (parseError) {
-      console.warn('Could not parse transaction logs:', parseError.message)
+      console.warn('⚠️ Could not parse transaction logs:', parseError.message)
+      // Continue without tokenId - not critical for success
     }
 
     // Cập nhật ticket với thông tin từ blockchain
@@ -431,31 +515,80 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
     ticketOrder.tokenId = mintedTokenId
 
     const savedTicket = await ticketOrder.save()
+    console.log(`✅ Ticket ${savedTicket.id} updated with MINTED status`)
 
     // Tạo QR code
-    const qrCodeInfo = generateQRCodeData({
-      ticketId: savedTicket.id,
-      eventId: savedTicket.eventId,
-      ownerAddress: savedTicket.ownerAddress
-    })
-
-    savedTicket.qrCodeData = qrCodeInfo.qrCodeData
-    savedTicket.qrCodeSecret = qrCodeInfo.qrCodeSecret
-    savedTicket.expiryTime = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
-
-    const finalTicket = await savedTicket.save()
-
-    // Decrease available quantity
-    const ticketType = await TicketType.findById(ticketOrder.ticketTypeId)
-    if (ticketType && ticketType.availableQuantity > 0) {
-      await TicketType.findByIdAndUpdate(ticketOrder.ticketTypeId, {
-        $inc: { availableQuantity: -1 }
+    try {
+      const qrCodeInfo = generateQRCodeData({
+        ticketId: savedTicket.id,
+        eventId: savedTicket.eventId,
+        ownerAddress: savedTicket.ownerAddress
       })
-    }
 
-    callback(null, { ticket: ticketDocumentToGrpcTicket(finalTicket) })
+      savedTicket.qrCodeData = qrCodeInfo.qrCodeData
+      savedTicket.qrCodeSecret = qrCodeInfo.qrCodeSecret
+      savedTicket.expiryTime = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+
+      const finalTicket = await savedTicket.save()
+      console.log(`✅ QR code generated for ticket ${finalTicket.id}`)
+
+      // Decrease available quantity
+      const ticketType = await TicketType.findById(ticketOrder.ticketTypeId)
+      if (ticketType && ticketType.availableQuantity > 0) {
+        await TicketType.findByIdAndUpdate(ticketOrder.ticketTypeId, {
+          $inc: { availableQuantity: -1 }
+        })
+        console.log(
+          `✅ Decreased available quantity for ticket type ${ticketType.id}`
+        )
+      }
+
+      // ✅ THÊM: Create Platform Transaction record
+      try {
+        const PlatformTransaction = require('../models/PlatformTransaction')
+
+        const platformFeePercent = 5 // 5% platform fee
+        const totalAmountWei = verifyResponse.value_wei || '0'
+        const platformFeeWei = (
+          (BigInt(totalAmountWei) * BigInt(platformFeePercent)) /
+          BigInt(100)
+        ).toString()
+        const organizerAmountWei = (
+          BigInt(totalAmountWei) - BigInt(platformFeeWei)
+        ).toString()
+
+        const platformTransaction = new PlatformTransaction({
+          transactionHash: payment_transaction_hash,
+          ticketOrderId: ticket_order_id,
+          eventId: savedTicket.eventId,
+          eventOrganizerId: 'PENDING_FETCH_FROM_EVENT_SERVICE',
+          buyerAddress: savedTicket.ownerAddress,
+          amountWei: totalAmountWei,
+          platformFeeWei: platformFeeWei,
+          organizerAmountWei: organizerAmountWei,
+          status: 'RECEIVED'
+        })
+
+        await platformTransaction.save()
+        console.log(
+          `✅ Platform transaction record created: ${platformTransaction.id}`
+        )
+      } catch (platformTxError) {
+        console.warn(
+          '⚠️ Failed to create platform transaction record:',
+          platformTxError.message
+        )
+        // Don't fail the main flow for this
+      }
+
+      callback(null, { ticket: ticketDocumentToGrpcTicket(finalTicket) })
+    } catch (qrError) {
+      console.error('❌ QR code generation failed:', qrError)
+      // Return ticket without QR code rather than failing
+      callback(null, { ticket: ticketDocumentToGrpcTicket(savedTicket) })
+    }
   } catch (error) {
-    console.error('ConfirmPaymentAndRequestMint error:', error)
+    console.error('❌ ConfirmPaymentAndRequestMint error:', error)
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to confirm payment'
