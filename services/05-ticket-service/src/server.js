@@ -13,6 +13,7 @@ const HealthImplementation = healthCheck.HealthImplementation
 
 const ticketServiceHandlers = require('./handlers/ticketServiceHandlers')
 const ticketTypeServiceHandlers = require('./handlers/ticketTypeServiceHandlers')
+const settlementHandlers = require('./handlers/settlementHandlers')
 
 const SERVICE_TYPE = process.env.SERVICE_TYPE
 const PORT = process.env.PORT || 50055
@@ -84,6 +85,7 @@ const mainPackageDefinition = protoLoader.loadSync(TICKET_PROTO_PATH, {
 const ticketProto = grpc.loadPackageDefinition(mainPackageDefinition).ticket // package 'ticket'
 const TicketServiceDefinition = ticketProto.TicketService.service
 const TicketTypeServiceDefinition = ticketProto.TicketTypeService.service
+const SettlementServiceDefinition = ticketProto.SettlementService.service
 
 const statusMap = { '': 'NOT_SERVING', [SERVICE_NAME]: 'NOT_SERVING' }
 const healthImplementation = new HealthImplementation(statusMap)
@@ -100,6 +102,7 @@ async function main () {
   const server = new grpc.Server()
   server.addService(TicketServiceDefinition, ticketServiceHandlers)
   server.addService(TicketTypeServiceDefinition, ticketTypeServiceHandlers)
+  server.addService(SettlementServiceDefinition, settlementHandlers)
   healthImplementation.addToServer(server)
 
   server.bindAsync(

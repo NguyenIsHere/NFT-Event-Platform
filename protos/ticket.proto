@@ -87,6 +87,89 @@ service TicketService {
   }
 }
 
+// THÊM Settlement Service
+service SettlementService {
+  rpc GetEventSettlementSummary(GetEventSettlementSummaryRequest) returns (GetEventSettlementSummaryResponse) {
+    option (google.api.http) = {
+      get: "/v1/settlements/events/{event_id}/summary"
+    };
+  }
+
+  rpc ProcessEventSettlement(ProcessEventSettlementRequest) returns (ProcessEventSettlementResponse) {
+    option (google.api.http) = {
+      post: "/v1/settlements/events/{event_id}/process"
+      body: "*"
+    };
+  }
+
+  rpc ListPlatformTransactions(ListPlatformTransactionsRequest) returns (ListPlatformTransactionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/settlements/transactions"
+    };
+  }
+}
+
+// Settlement Messages
+message GetEventSettlementSummaryRequest {
+  string event_id = 1;
+}
+
+message SettlementSummary {
+  int32 count = 1;
+  string total_amount_wei = 2;
+  string total_platform_fee_wei = 3;
+  string total_organizer_amount_wei = 4;
+}
+
+message GetEventSettlementSummaryResponse {
+  string event_id = 1;
+  SettlementSummary received_summary = 2;
+  SettlementSummary settled_summary = 3;
+}
+
+message ProcessEventSettlementRequest {
+  string event_id = 1;
+  string settlement_transaction_hash = 2;
+}
+
+message ProcessEventSettlementResponse {
+  bool success = 1;
+  string event_id = 2;
+  int32 settled_transactions_count = 3;
+  string total_organizer_amount_wei = 4;
+  string total_platform_fee_wei = 5;
+  string settlement_transaction_hash = 6;
+}
+
+message PlatformTransaction {
+  string id = 1;
+  string transaction_hash = 2;
+  string ticket_order_id = 3;
+  string event_id = 4;
+  string event_organizer_id = 5;
+  string buyer_address = 6;
+  string amount_wei = 7;
+  string platform_fee_wei = 8;
+  string organizer_amount_wei = 9;
+  int32 platform_fee_percent = 10;
+  string status = 11;
+  int64 created_at = 12;
+  int64 settled_at = 13;
+  string settlement_transaction_hash = 14;
+}
+
+message ListPlatformTransactionsRequest {
+  string event_id = 1;
+  string status_filter = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListPlatformTransactionsResponse {
+  repeated PlatformTransaction transactions = 1;
+  string next_page_token = 2;
+}
+
 // _____ Models _____
 message Ticket {
   string id = 1;

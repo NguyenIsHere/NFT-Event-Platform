@@ -219,19 +219,163 @@ async function InitiatePurchase (call, callback) {
   }
 }
 
+// async function ConfirmPaymentAndRequestMint (call, callback) {
+//   const { ticket_order_id, payment_transaction_hash } = call.request
+//   console.log(
+//     `TicketService: ConfirmPaymentAndRequestMint for ticket_order_id: ${ticket_order_id}, payment_tx: ${payment_transaction_hash}`
+//   )
+
+//   try {
+//     if (!mongoose.Types.ObjectId.isValid(ticket_order_id)) {
+//       return callback({
+//         code: grpc.status.INVALID_ARGUMENT,
+//         message: 'Invalid ticket_order_id format.'
+//       })
+//     }
+//     const ticketOrder = await Ticket.findById(ticket_order_id)
+//     if (!ticketOrder) {
+//       return callback({
+//         code: grpc.status.NOT_FOUND,
+//         message: 'Ticket order not found.'
+//       })
+//     }
+//     if (ticketOrder.status !== TICKET_STATUS_ENUM[0]) {
+//       // PENDING_PAYMENT
+//       return callback({
+//         code: grpc.status.FAILED_PRECONDITION,
+//         message: `Ticket order is not awaiting payment. Current status: ${ticketOrder.status}`
+//       })
+//     }
+//     if (!ticketOrder.tokenUriCid) {
+//       return callback({
+//         code: grpc.status.INTERNAL,
+//         message:
+//           'Ticket order is missing tokenUriCid, cannot proceed with minting.'
+//       })
+//     }
+
+//     // 1. (Tùy chọn) Xác minh payment_transaction_hash (nếu là thanh toán off-chain hoặc on-chain vào ví Owner)
+//     //    Nếu thanh toán on-chain vào contract EventTicketNFT (qua hàm buyTickets) thì logic sẽ khác.
+//     //    Hiện tại, chúng ta giả định thanh toán đã được xác nhận bằng cách nào đó (ví dụ, admin duyệt)
+//     //    và client gọi endpoint này để kích hoạt mint.
+//     //    Nếu có `payment_transaction_hash`, bạn có thể gọi blockchainServiceClient.VerifyTransaction(payment_transaction_hash)
+//     console.log(
+//       `TicketService: Payment for order ${ticket_order_id} assumed confirmed (tx: ${payment_transaction_hash}). Proceeding to mint.`
+//     )
+//     ticketOrder.status = TICKET_STATUS_ENUM[1] // PAID (hoặc MINTING)
+//     // ticketOrder.transactionHash = payment_transaction_hash; // Nếu tx này là tx mint thì sẽ cập nhật sau
+//     await ticketOrder.save()
+
+//     // 2. Lấy thông tin TicketType để biết blockchain_event_id và session_id
+//     const ticketType = await TicketType.findById(
+//       ticketOrder.ticketTypeId
+//     ).lean()
+//     if (
+//       !ticketType ||
+//       !ticketType.blockchainEventId ||
+//       (!ticketType.contractSessionId && ticketType.contractSessionId !== '0')
+//     ) {
+//       throw new Error(
+//         `TicketType ${ticketOrder.ticketTypeId} is missing blockchainEventId or contractSessionId.`
+//       )
+//     }
+
+//     // 3. Gọi BlockchainService để mint vé
+//     const fullTokenUriForContract = `ipfs://${ticketOrder.tokenUriCid}`
+//     console.log(
+//       `TicketService: Requesting mint from BlockchainService for order ${ticketOrder.id}, buyer: ${ticketOrder.ownerAddress}, URI: ${fullTokenUriForContract}`
+//     )
+
+//     const mintResponse = await new Promise((resolve, reject) => {
+//       blockchainServiceClient.MintTicket(
+//         {
+//           buyer_address: ticketOrder.ownerAddress,
+//           token_uri_cid: fullTokenUriForContract, // URI đầy đủ
+//           blockchain_event_id: ticketType.blockchainEventId.toString(),
+//           session_id_for_contract:
+//             ticketType.contractSessionId.toString() || '0'
+//         },
+//         { deadline: new Date(Date.now() + 60000) }, // Timeout dài cho minting
+//         (err, response) => {
+//           if (err) return reject(err)
+//           resolve(response)
+//         }
+//       )
+//     })
+
+//     if (mintResponse && mintResponse.success) {
+//       // Cập nhật ticket với thông tin mint
+//       ticketOrder.tokenId = mintResponse.token_id
+//       ticketOrder.transactionHash = mintResponse.transaction_hash
+//       ticketOrder.status = TICKET_STATUS_ENUM[4] // MINTED
+
+//       if (
+//         ticketOrder.ownerAddress.toLowerCase() !==
+//         mintResponse.owner_address.toLowerCase()
+//       ) {
+//         ticketOrder.ownerAddress = mintResponse.owner_address.toLowerCase()
+//       }
+
+//       const savedTicket = await ticketOrder.save()
+
+//       // TẠO QR CODE NGAY SAU KHI MINT THÀNH CÔNG
+//       try {
+//         const qrCodeInfo = generateQRCodeData({
+//           ticketId: savedTicket.id,
+//           eventId: savedTicket.eventId,
+//           ownerAddress: savedTicket.ownerAddress
+//         })
+
+//         const expiryTime = new Date()
+//         expiryTime.setFullYear(expiryTime.getFullYear() + 1)
+
+//         savedTicket.qrCodeData = qrCodeInfo.qrCodeData
+//         savedTicket.qrCodeSecret = qrCodeInfo.qrCodeSecret
+//         savedTicket.expiryTime = expiryTime
+
+//         const finalSavedTicket = await savedTicket.save()
+
+//         console.log(
+//           `TicketService: QR code generated for ticket ${finalSavedTicket.id}`
+//         )
+
+//         // Giảm available quantity
+//         if (ticketType.availableQuantity > 0) {
+//           await TicketType.findByIdAndUpdate(ticketOrder.ticketTypeId, {
+//             $inc: { availableQuantity: -1 }
+//           })
+//         }
+
+//         callback(null, { ticket: ticketDocumentToGrpcTicket(finalSavedTicket) })
+//       } catch (qrError) {
+//         console.error('TicketService: QR code generation failed:', qrError)
+//         // QR code generation failure shouldn't fail the mint
+//         callback(null, { ticket: ticketDocumentToGrpcTicket(savedTicket) })
+//       }
+//     } else {
+//       ticketOrder.status = TICKET_STATUS_ENUM[5] // FAILED_MINT
+//       await ticketOrder.save()
+//       throw new Error(
+//         mintResponse.message || 'Failed to mint NFT via BlockchainService.'
+//       )
+//     }
+//   } catch (error) {
+//     console.error(
+//       'TicketService: ConfirmPaymentAndRequestMint RPC error:',
+//       error
+//     )
+//     callback({
+//       code: grpc.status.INTERNAL,
+//       message: error.message || 'Failed to confirm payment and mint ticket.'
+//     })
+//   }
+// }
+
+// ticketServiceHandlers.js - ConfirmPaymentAndRequestMint
 async function ConfirmPaymentAndRequestMint (call, callback) {
   const { ticket_order_id, payment_transaction_hash } = call.request
-  console.log(
-    `TicketService: ConfirmPaymentAndRequestMint for ticket_order_id: ${ticket_order_id}, payment_tx: ${payment_transaction_hash}`
-  )
 
   try {
-    if (!mongoose.Types.ObjectId.isValid(ticket_order_id)) {
-      return callback({
-        code: grpc.status.INVALID_ARGUMENT,
-        message: 'Invalid ticket_order_id format.'
-      })
-    }
     const ticketOrder = await Ticket.findById(ticket_order_id)
     if (!ticketOrder) {
       return callback({
@@ -239,63 +383,12 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
         message: 'Ticket order not found.'
       })
     }
-    if (ticketOrder.status !== TICKET_STATUS_ENUM[0]) {
-      // PENDING_PAYMENT
-      return callback({
-        code: grpc.status.FAILED_PRECONDITION,
-        message: `Ticket order is not awaiting payment. Current status: ${ticketOrder.status}`
-      })
-    }
-    if (!ticketOrder.tokenUriCid) {
-      return callback({
-        code: grpc.status.INTERNAL,
-        message:
-          'Ticket order is missing tokenUriCid, cannot proceed with minting.'
-      })
-    }
 
-    // 1. (Tùy chọn) Xác minh payment_transaction_hash (nếu là thanh toán off-chain hoặc on-chain vào ví Owner)
-    //    Nếu thanh toán on-chain vào contract EventTicketNFT (qua hàm buyTickets) thì logic sẽ khác.
-    //    Hiện tại, chúng ta giả định thanh toán đã được xác nhận bằng cách nào đó (ví dụ, admin duyệt)
-    //    và client gọi endpoint này để kích hoạt mint.
-    //    Nếu có `payment_transaction_hash`, bạn có thể gọi blockchainServiceClient.VerifyTransaction(payment_transaction_hash)
-    console.log(
-      `TicketService: Payment for order ${ticket_order_id} assumed confirmed (tx: ${payment_transaction_hash}). Proceeding to mint.`
-    )
-    ticketOrder.status = TICKET_STATUS_ENUM[1] // PAID (hoặc MINTING)
-    // ticketOrder.transactionHash = payment_transaction_hash; // Nếu tx này là tx mint thì sẽ cập nhật sau
-    await ticketOrder.save()
-
-    // 2. Lấy thông tin TicketType để biết blockchain_event_id và session_id
-    const ticketType = await TicketType.findById(
-      ticketOrder.ticketTypeId
-    ).lean()
-    if (
-      !ticketType ||
-      !ticketType.blockchainEventId ||
-      (!ticketType.contractSessionId && ticketType.contractSessionId !== '0')
-    ) {
-      throw new Error(
-        `TicketType ${ticketOrder.ticketTypeId} is missing blockchainEventId or contractSessionId.`
-      )
-    }
-
-    // 3. Gọi BlockchainService để mint vé
-    const fullTokenUriForContract = `ipfs://${ticketOrder.tokenUriCid}`
-    console.log(
-      `TicketService: Requesting mint from BlockchainService for order ${ticketOrder.id}, buyer: ${ticketOrder.ownerAddress}, URI: ${fullTokenUriForContract}`
-    )
-
-    const mintResponse = await new Promise((resolve, reject) => {
-      blockchainServiceClient.MintTicket(
-        {
-          buyer_address: ticketOrder.ownerAddress,
-          token_uri_cid: fullTokenUriForContract, // URI đầy đủ
-          blockchain_event_id: ticketType.blockchainEventId.toString(),
-          session_id_for_contract:
-            ticketType.contractSessionId.toString() || '0'
-        },
-        { deadline: new Date(Date.now() + 60000) }, // Timeout dài cho minting
+    // VERIFY TRANSACTION thay vì mint riêng
+    const verifyResponse = await new Promise((resolve, reject) => {
+      blockchainServiceClient.VerifyTransaction(
+        { transaction_hash: payment_transaction_hash },
+        { deadline: new Date(Date.now() + 10000) },
         (err, response) => {
           if (err) return reject(err)
           resolve(response)
@@ -303,70 +396,69 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
       )
     })
 
-    if (mintResponse && mintResponse.success) {
-      // Cập nhật ticket với thông tin mint
-      ticketOrder.tokenId = mintResponse.token_id
-      ticketOrder.transactionHash = mintResponse.transaction_hash
-      ticketOrder.status = TICKET_STATUS_ENUM[4] // MINTED
-
-      if (
-        ticketOrder.ownerAddress.toLowerCase() !==
-        mintResponse.owner_address.toLowerCase()
-      ) {
-        ticketOrder.ownerAddress = mintResponse.owner_address.toLowerCase()
-      }
-
-      const savedTicket = await ticketOrder.save()
-
-      // TẠO QR CODE NGAY SAU KHI MINT THÀNH CÔNG
-      try {
-        const qrCodeInfo = generateQRCodeData({
-          ticketId: savedTicket.id,
-          eventId: savedTicket.eventId,
-          ownerAddress: savedTicket.ownerAddress
-        })
-
-        const expiryTime = new Date()
-        expiryTime.setFullYear(expiryTime.getFullYear() + 1)
-
-        savedTicket.qrCodeData = qrCodeInfo.qrCodeData
-        savedTicket.qrCodeSecret = qrCodeInfo.qrCodeSecret
-        savedTicket.expiryTime = expiryTime
-
-        const finalSavedTicket = await savedTicket.save()
-
-        console.log(
-          `TicketService: QR code generated for ticket ${finalSavedTicket.id}`
-        )
-
-        // Giảm available quantity
-        if (ticketType.availableQuantity > 0) {
-          await TicketType.findByIdAndUpdate(ticketOrder.ticketTypeId, {
-            $inc: { availableQuantity: -1 }
-          })
-        }
-
-        callback(null, { ticket: ticketDocumentToGrpcTicket(finalSavedTicket) })
-      } catch (qrError) {
-        console.error('TicketService: QR code generation failed:', qrError)
-        // QR code generation failure shouldn't fail the mint
-        callback(null, { ticket: ticketDocumentToGrpcTicket(savedTicket) })
-      }
-    } else {
-      ticketOrder.status = TICKET_STATUS_ENUM[5] // FAILED_MINT
-      await ticketOrder.save()
-      throw new Error(
-        mintResponse.message || 'Failed to mint NFT via BlockchainService.'
-      )
+    if (!verifyResponse.is_confirmed || !verifyResponse.success_on_chain) {
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: 'Transaction not confirmed or failed on-chain'
+      })
     }
+
+    // Parse transaction logs để lấy tokenId từ TicketMinted event
+    let mintedTokenId = '0'
+    try {
+      // Gọi blockchain service để parse logs
+      const parseLogsResponse = await new Promise((resolve, reject) => {
+        blockchainServiceClient.ParseTransactionLogs(
+          { transaction_hash: payment_transaction_hash },
+          { deadline: new Date(Date.now() + 5000) },
+          (err, response) => {
+            if (err) return reject(err)
+            resolve(response)
+          }
+        )
+      })
+
+      if (parseLogsResponse.minted_token_id) {
+        mintedTokenId = parseLogsResponse.minted_token_id
+      }
+    } catch (parseError) {
+      console.warn('Could not parse transaction logs:', parseError.message)
+    }
+
+    // Cập nhật ticket với thông tin từ blockchain
+    ticketOrder.status = TICKET_STATUS_ENUM[4] // MINTED
+    ticketOrder.transactionHash = payment_transaction_hash
+    ticketOrder.tokenId = mintedTokenId
+
+    const savedTicket = await ticketOrder.save()
+
+    // Tạo QR code
+    const qrCodeInfo = generateQRCodeData({
+      ticketId: savedTicket.id,
+      eventId: savedTicket.eventId,
+      ownerAddress: savedTicket.ownerAddress
+    })
+
+    savedTicket.qrCodeData = qrCodeInfo.qrCodeData
+    savedTicket.qrCodeSecret = qrCodeInfo.qrCodeSecret
+    savedTicket.expiryTime = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+
+    const finalTicket = await savedTicket.save()
+
+    // Decrease available quantity
+    const ticketType = await TicketType.findById(ticketOrder.ticketTypeId)
+    if (ticketType && ticketType.availableQuantity > 0) {
+      await TicketType.findByIdAndUpdate(ticketOrder.ticketTypeId, {
+        $inc: { availableQuantity: -1 }
+      })
+    }
+
+    callback(null, { ticket: ticketDocumentToGrpcTicket(finalTicket) })
   } catch (error) {
-    console.error(
-      'TicketService: ConfirmPaymentAndRequestMint RPC error:',
-      error
-    )
+    console.error('ConfirmPaymentAndRequestMint error:', error)
     callback({
       code: grpc.status.INTERNAL,
-      message: error.message || 'Failed to confirm payment and mint ticket.'
+      message: error.message || 'Failed to confirm payment'
     })
   }
 }

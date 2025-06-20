@@ -368,9 +368,62 @@ async function VerifyTransaction (call, callback) {
   }
 }
 
+// blockchainServiceHandlers.js - Thêm method mới
+async function ParseTransactionLogs (call, callback) {
+  const { transaction_hash } = call.request
+  console.log(`ParseTransactionLogs called for hash: ${transaction_hash}`)
+
+  try {
+    const receipt = await provider.getTransactionReceipt(transaction_hash)
+    if (!receipt) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Transaction receipt not found'
+      })
+    }
+
+    let mintedTokenId = null
+    let eventId = null
+    let sessionId = null
+
+    // Parse logs để tìm TicketMinted event
+    for (const log of receipt.logs || []) {
+      try {
+        const parsedLog = eventTicketNFTContract.interface.parseLog(log)
+        if (parsedLog && parsedLog.name === 'TicketMinted') {
+          mintedTokenId = parsedLog.args.tokenId.toString()
+          eventId = parsedLog.args.eventId.toString()
+          sessionId = parsedLog.args.sessionId.toString()
+
+          console.log(
+            `Found TicketMinted: tokenId=${mintedTokenId}, eventId=${eventId}, sessionId=${sessionId}`
+          )
+          break
+        }
+      } catch (e) {
+        // Ignore logs that aren't from our contract
+      }
+    }
+
+    callback(null, {
+      success: true,
+      minted_token_id: mintedTokenId || '',
+      event_id: eventId || '',
+      session_id: sessionId || ''
+    })
+  } catch (error) {
+    console.error('ParseTransactionLogs Error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to parse transaction logs'
+    })
+  }
+}
+
 module.exports = {
   RegisterEventOnBlockchain,
   GetTicketPaymentDetails,
-  MintTicket,
-  VerifyTransaction
+  MintTicket, // Giữ lại cho admin mint nếu cần
+  VerifyTransaction,
+  ParseTransactionLogs // Thêm method mới
 }

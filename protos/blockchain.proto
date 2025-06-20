@@ -24,6 +24,9 @@ service BlockchainService {
 
   // (Tùy chọn) Xác minh một giao dịch chung
   rpc VerifyTransaction(VerifyTransactionRequest) returns (VerifyTransactionResponse);
+
+  // (Tùy chọn) Phân tích logs của một giao dịch để lấy thông tin chi tiết
+  rpc ParseTransactionLogs(ParseTransactionLogsRequest) returns (ParseTransactionLogsResponse);
 }
 
 // ----- Messages -----
@@ -81,4 +84,15 @@ message VerifyTransactionResponse {
   string value_wei = 5;
   uint64 block_number = 6;
   // Thêm các thông tin khác từ giao dịch nếu cần
+}
+
+message ParseTransactionLogsRequest {
+  string transaction_hash = 1;
+}
+
+message ParseTransactionLogsResponse {
+  bool success = 1;
+  string minted_token_id = 2;
+  string event_id = 3;
+  string session_id = 4;
 }
