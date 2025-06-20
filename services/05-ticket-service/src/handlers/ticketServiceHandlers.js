@@ -46,9 +46,11 @@ function ticketDocumentToGrpcTicket (ticketDoc) {
 
 async function InitiatePurchase (call, callback) {
   const { ticket_type_id, buyer_address } = call.request
-  console.log(
-    `TicketService: InitiatePurchase for ticket_type_id: ${ticket_type_id}, buyer: ${buyer_address}`
-  )
+  console.log(`🎯 InitiatePurchase called:`, {
+    ticket_type_id,
+    buyer_address,
+    timestamp: new Date().toISOString()
+  })
 
   try {
     if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
@@ -64,6 +66,51 @@ async function InitiatePurchase (call, callback) {
         message: 'TicketType not found.'
       })
     }
+
+    // ✅ THÊM: Check for existing pending tickets trong 10 phút gần đây
+    const recentCutoff = new Date(Date.now() - 10 * 60 * 1000) // 10 minutes ago
+
+    const existingPendingTicket = await Ticket.findOne({
+      ticketTypeId: ticket_type_id,
+      ownerAddress: buyer_address.toLowerCase(),
+      status: TICKET_STATUS_ENUM[0], // PENDING_PAYMENT
+      createdAt: { $gte: recentCutoff }
+    }).sort({ createdAt: -1 })
+
+    if (existingPendingTicket) {
+      console.log(
+        `✅ Found existing pending ticket: ${existingPendingTicket.id}, reusing it`
+      )
+
+      // Get payment details for existing ticket
+      const paymentDetails = await new Promise((resolve, reject) => {
+        blockchainServiceClient.GetTicketPaymentDetails(
+          {
+            blockchain_event_id: ticketType.blockchainEventId.toString(),
+            price_wei_from_ticket_type: ticketType.priceWei
+          },
+          { deadline: new Date(Date.now() + 5000) },
+          (err, response) => {
+            if (err) return reject(err)
+            resolve(response)
+          }
+        )
+      })
+
+      // Return existing ticket order details
+      return callback(null, {
+        ticket_order_id: existingPendingTicket.id.toString(),
+        payment_contract_address: paymentDetails.payment_contract_address,
+        price_to_pay_wei: paymentDetails.price_to_pay_wei,
+        blockchain_event_id: ticketType.blockchainEventId.toString(),
+        session_id_for_contract: ticketType.contractSessionId.toString(),
+        token_uri_cid: existingPendingTicket.tokenUriCid
+      })
+    }
+
+    // ✅ CONTINUE with normal flow chỉ khi không có existing ticket
+    console.log(`🆕 Creating NEW ticket order for ${buyer_address}`)
+
     if (ticketType.availableQuantity <= 0) {
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
