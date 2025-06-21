@@ -195,6 +195,13 @@ routes:
 
   
   # TicketService Routes
+  # ✅ CRITICAL: Đặt ALL specific routes TRƯỚC generic {ticket_id} route
+  - name: ticket-list-all-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/tickets/all$"]
+    methods: [GET]
+    strip_path: false
+
   - name: ticket-initiate-purchase-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/initiate-purchase$"]
@@ -207,25 +214,27 @@ routes:
     methods: [POST]
     strip_path: false
 
+  - name: ticket-check-in-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/tickets/check-in$"]
+    methods: [POST]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
   - name: ticket-list-by-owner-route-v1
     service: ticket-grpc-service
-    paths: ["~/v1/tickets/by-owner/(?<owner_address>[^/]+)$"] # Path đã sửa
+    paths: ["~/v1/tickets/by-owner/(?<owner_address>[^/]+)$"]
     methods: [GET]
     strip_path: false
 
   - name: ticket-list-by-event-route-v1
     service: ticket-grpc-service
-    paths: ["~/v1/tickets/by-event/(?<event_id>[^/]+)$"] # Path đã sửa
+    paths: ["~/v1/tickets/by-event/(?<event_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
 
-  - name: ticket-get-by-id-route-v1
-    service: ticket-grpc-service
-    paths: ["~/v1/tickets/(?<ticket_id>[^/]+)$"]
-    methods: [GET]
-    strip_path: false
-
-# QR Code routes for ticket service
   - name: ticket-generate-qr-code-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/(?<ticket_id>[^/]+)/qr-code$"]
@@ -235,21 +244,12 @@ routes:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
-  - name: ticket-qr-code-image-route-v1
+  # ✅ CRITICAL: Generic route PHẢI có priority THẤP NHẤT
+  - name: ticket-get-by-id-route-v1
     service: ticket-grpc-service
-    paths: ["~/v1/tickets/(?<ticket_id>[^/]+)/qr-code/image$"]
+    paths: ["~/v1/tickets/(?<ticket_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
-    # Không cần JWT cho image endpoint
-
-  - name: ticket-check-in-route-v1
-    service: ticket-grpc-service
-    paths: ["~/v1/tickets/check-in$"]
-    methods: [POST]
-    strip_path: false
-    plugins:
-      - name: jwt
-        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
   # === SeatMap Service Routes ===
   # Lưu ý: event_id và seat_map_id thường là MongoDB ObjectId (24 ký tự hex)

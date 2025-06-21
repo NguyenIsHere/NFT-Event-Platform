@@ -55,9 +55,15 @@ service TicketService {
     };
   }
 
+    rpc ListAllTickets(ListAllTicketsRequest) returns (ListTicketsResponse) {
+    option (google.api.http) = {
+      get: "/v1/tickets/all"
+    };
+  }
+
   rpc GetTicket(GetTicketRequest) returns (Ticket) {
     option (google.api.http) = {
-      get: "/v1/tickets/{ticket-id}"
+      get: "/v1/tickets/{ticket_id}"
     };
   }
   
@@ -188,7 +194,6 @@ message Ticket {
   int64 check_in_time = 13;
   string check_in_location = 14;
   int64 expiry_time = 15;
-  string qr_code_image_url = 16;
 }
 
 message TicketType {
@@ -303,5 +308,11 @@ message GenerateQRCodeResponse {
   string message = 2;
   string qr_code_data = 3;
   string qr_code_image_base64 = 4;
+}
+
+message ListAllTicketsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  string status_filter = 3;
 }
 

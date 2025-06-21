@@ -37,10 +37,7 @@ function ticketDocumentToGrpcTicket (ticketDoc) {
     check_in_location: ticketJson.checkInLocation || '',
     expiry_time: ticketDoc.expiryTime
       ? Math.floor(new Date(ticketDoc.expiryTime).getTime() / 1000)
-      : 0,
-    qr_code_image_url: ticketJson.id
-      ? `/v1/tickets/${ticketJson.id}/qr-code/image`
-      : ''
+      : 0
   }
 }
 
@@ -196,7 +193,7 @@ async function InitiatePurchase (call, callback) {
         {
           json_content: jsonContentString,
           options: {
-            pin_name: `ticket_meta_event_${
+            pin_name: `ticket_june_event_${
               ticketType.eventId
             }_tt_${ticket_type_id}_${Date.now()}`
           }
@@ -900,6 +897,51 @@ async function ListTicketsByOwner (call, callback) {
   }
 }
 
+async function ListAllTickets (call, callback) {
+  const { page_size = 20, page_token, status_filter } = call.request
+  console.log(
+    `TicketService: ListAllTickets called with page_size: ${page_size}`
+  )
+
+  try {
+    const query = {}
+    if (status_filter) {
+      query.status = status_filter
+    }
+
+    const limit = Math.min(page_size, 100)
+    let skip = 0
+
+    if (page_token) {
+      try {
+        skip = parseInt(page_token)
+      } catch (e) {
+        skip = 0
+      }
+    }
+
+    const tickets = await Ticket.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit + 1)
+
+    const hasMore = tickets.length > limit
+    const ticketsToReturn = hasMore ? tickets.slice(0, limit) : tickets
+    const nextPageToken = hasMore ? (skip + limit).toString() : ''
+
+    callback(null, {
+      tickets: ticketsToReturn.map(ticketDocumentToGrpcTicket),
+      next_page_token: nextPageToken
+    })
+  } catch (error) {
+    console.error('TicketService: ListAllTickets RPC error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to list all tickets.'
+    })
+  }
+}
+
 module.exports = {
   InitiatePurchase,
   ConfirmPaymentAndRequestMint,
@@ -907,5 +949,6 @@ module.exports = {
   CheckIn,
   GetTicket,
   ListTicketsByEvent,
-  ListTicketsByOwner
+  ListTicketsByOwner,
+  ListAllTickets
 }
