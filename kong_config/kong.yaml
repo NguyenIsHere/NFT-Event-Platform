@@ -6,7 +6,7 @@ consumers:
     jwt_secrets:
       - key: "my-application"
         algorithm: HS256
-        secret: "{env://KONG_JWT_SHARED_SECRET_VAR}"
+        secret: "KY25gBBwvfoDR8Srbi+dRuh6QWNr0hI77wZooGArteL6WL+PgUVZMLImOn/J+UJc2EjASIRXF6EIoADCfX7lzg=="
 
 # --- Services ---
 services:
@@ -111,11 +111,9 @@ routes:
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
   - name: user-get-by-id-route-v1
     service: user-grpc-service
-    # Regex: /v1/users/ theo sau là một chuỗi không chứa dấu / (user_id)
     paths: ["~/v1/users/(?<user_id>[^/]+)$"] 
     methods: [GET]
     strip_path: false
- # Ưu tiên thấp hơn các route GET cụ thể của user
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }

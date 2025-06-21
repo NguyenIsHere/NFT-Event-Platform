@@ -728,13 +728,32 @@ async function CheckIn (call, callback) {
     }
 
     // Verify QR code signature
+    // ✅ FIX: Better error mapping for QR verification
     const verification = verifyQRCodeData(qr_code_data, ticket.qrCodeSecret)
     if (!verification.valid) {
+      // Map different failure reasons to appropriate status codes
+      let statusCode = grpc.status.UNAUTHENTICATED
+      let message = `QR code verification failed: ${verification.reason}`
+
+      if (verification.reason === 'QR code expired') {
+        statusCode = grpc.status.FAILED_PRECONDITION // 400 Bad Request
+        message = 'QR code has expired. Please regenerate a new QR code.'
+      } else if (verification.reason === 'Invalid signature') {
+        statusCode = grpc.status.UNAUTHENTICATED // 401 Unauthorized
+        message = 'QR code signature is invalid.'
+      } else if (verification.reason === 'Invalid QR code format') {
+        statusCode = grpc.status.INVALID_ARGUMENT // 400 Bad Request
+        message = 'QR code format is invalid.'
+      }
+
+      console.log(`❌ QR verification failed: ${verification.reason}`)
       return callback({
-        code: grpc.status.UNAUTHENTICATED,
-        message: `QR code verification failed: ${verification.reason}`
+        code: statusCode,
+        message: message
       })
     }
+
+    console.log(`✅ QR code verified successfully for ticket: ${ticket.id}`)
 
     // Kiểm tra ticket status
     if (ticket.status !== TICKET_STATUS_ENUM[4]) {

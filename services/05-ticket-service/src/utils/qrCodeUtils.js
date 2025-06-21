@@ -57,7 +57,7 @@ function verifyQRCodeData (qrCodeDataString, secret) {
     }
 
     // Check timestamp (QR code có thể có thời gian hết hạn)
-    const maxAge = 24 * 60 * 60 * 1000 // 24 hours
+    const maxAge = 24 * 7 * 60 * 60 * 1000 // 24 hours
     if (Date.now() - qrData.timestamp > maxAge) {
       return { valid: false, reason: 'QR code expired' }
     }
