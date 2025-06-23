@@ -8,6 +8,7 @@ const {
   ticketServiceClient,
   ticketTypeServiceClient
 } = require('../clients/ticketServiceClient')
+const { extractUserIdFromMetadata } = require('../utils/jwtUtils')
 
 // Helper chuyển đổi Mongoose document sang gRPC message
 function eventToGrpcEvent (eventDoc) {
@@ -40,8 +41,16 @@ function eventToGrpcEvent (eventDoc) {
 }
 
 async function CreateEvent (call, callback) {
+  console.log('🔍 EventService: CreateEvent called')
+
+  // ✅ LOG REQUEST DETAILS
+  console.log('🔍 Request details:', {
+    request: call.request,
+    requestType: typeof call.request,
+    requestKeys: call.request ? Object.keys(call.request) : 'No request object'
+  })
+
   const {
-    organizer_id,
     name,
     description,
     location,
@@ -49,98 +58,222 @@ async function CreateEvent (call, callback) {
     banner_original_file_name,
     sessions,
     seat_map_enabled
-    // is_active được bỏ, mặc định là DRAFT và is_active=false
-  } = call.request
+  } = call.request || {}
+
+  // ✅ DETAILED FIELD LOGGING
+  console.log('🔍 Extracted fields:', {
+    name: `"${name}" (type: ${typeof name}, length: ${name?.length})`,
+    description: `"${description?.substring(
+      0,
+      50
+    )}..." (type: ${typeof description}, length: ${description?.length})`,
+    location: `"${location}" (type: ${typeof location}, length: ${
+      location?.length
+    })`,
+    sessions: `${sessions?.length} sessions (type: ${typeof sessions})`,
+    seat_map_enabled: `${seat_map_enabled} (type: ${typeof seat_map_enabled})`,
+    banner_file_content_base64: banner_file_content_base64
+      ? `${banner_file_content_base64.length} chars`
+      : 'None',
+    banner_original_file_name: `"${banner_original_file_name}"`
+  })
+
+  // ✅ EXTRACT USER ID FROM JWT
+  const organizerId = extractUserIdFromMetadata(call.metadata)
 
   console.log(
-    `EventService: CreateEvent (DRAFT) called for name: "${name}" by organizer: ${organizer_id}`
+    `🔍 EventService: CreateEvent called for name: "${name}" by organizer: ${
+      organizerId || 'UNKNOWN'
+    }`
   )
 
   try {
+    // ✅ VALIDATE ORGANIZER ID
+    if (!organizerId) {
+      console.error('🔥 EventService: No organizer_id found in JWT token')
+      return callback({
+        code: grpc.status.UNAUTHENTICATED,
+        message:
+          'Unable to identify user from JWT token. Please ensure you are properly authenticated.'
+      })
+    }
+
+    // ✅ VALIDATE REQUIRED FIELDS WITH DETAILED ERRORS
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      console.error('🔥 EventService: Invalid name:', {
+        name,
+        type: typeof name,
+        trimmed: name?.trim()
+      })
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Event name is required and must be a non-empty string.'
+      })
+    }
+
+    if (
+      !description ||
+      typeof description !== 'string' ||
+      !description.trim()
+    ) {
+      console.error('🔥 EventService: Invalid description:', {
+        description,
+        type: typeof description,
+        trimmed: description?.trim()
+      })
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Event description is required and must be a non-empty string.'
+      })
+    }
+
+    if (!sessions || !Array.isArray(sessions) || sessions.length === 0) {
+      console.error('🔥 EventService: Invalid sessions:', {
+        sessions,
+        type: typeof sessions,
+        length: sessions?.length
+      })
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'At least one session is required.'
+      })
+    }
+
+    console.log(
+      '✅ EventService: All validations passed, proceeding with event creation...'
+    )
+
+    // ✅ PROCESS BANNER UPLOAD
     let bannerUrlCid = ''
     if (banner_file_content_base64 && banner_original_file_name) {
       console.log(
-        `EventService: Uploading banner "${banner_original_file_name}" to IPFS...`
-      )
-      const fileContentBuffer = Buffer.from(
-        banner_file_content_base64,
-        'base64'
+        `🔍 EventService: Uploading banner "${banner_original_file_name}" to IPFS...`
       )
 
-      const ipfsResponse = await new Promise((resolve, reject) => {
-        ipfsServiceClient.PinFileToIPFS(
-          {
-            file_content: fileContentBuffer,
-            original_file_name: banner_original_file_name,
-            options: { pin_name: `event_banner_${name}_${Date.now()}` }
-          },
-          { deadline: new Date(Date.now() + 10000) }, // Timeout 10 giây
-          (err, response) => {
-            if (err) {
-              console.error(
-                'EventService: Error calling PinFileToIPFS -',
-                err.details || err.message
-              )
-              return reject(err)
-            }
-            resolve(response)
-          }
+      try {
+        const fileContentBuffer = Buffer.from(
+          banner_file_content_base64,
+          'base64'
         )
-      })
-      bannerUrlCid = ipfsResponse.ipfs_hash
-      console.log(`EventService: Banner uploaded to IPFS, CID: ${bannerUrlCid}`)
+        console.log(
+          `🔍 EventService: Banner buffer size: ${fileContentBuffer.length} bytes`
+        )
+
+        const ipfsResponse = await new Promise((resolve, reject) => {
+          ipfsServiceClient.PinFileToIPFS(
+            {
+              file_content: fileContentBuffer,
+              original_file_name: banner_original_file_name,
+              options: { pin_name: `event_banner_${name}_${Date.now()}` }
+            },
+            { deadline: new Date(Date.now() + 10000) },
+            (err, response) => {
+              if (err) {
+                console.error(
+                  '🔥 EventService: Error calling PinFileToIPFS:',
+                  err.details || err.message
+                )
+                return reject(err)
+              }
+              resolve(response)
+            }
+          )
+        })
+
+        bannerUrlCid = ipfsResponse.ipfs_hash
+        console.log(
+          `✅ EventService: Banner uploaded to IPFS, CID: ${bannerUrlCid}`
+        )
+      } catch (ipfsError) {
+        console.error('🔥 EventService: IPFS upload failed:', ipfsError)
+        // Continue without banner rather than failing completely
+        console.log(
+          '⚠️ EventService: Continuing without banner due to upload failure'
+        )
+      }
     }
 
+    // ✅ PROCESS SESSIONS
     const mongooseSessions = sessions.map((s_in, index) => {
       let contractSessionIdForDb = s_in.contract_session_id
       if (!contractSessionIdForDb) {
-        contractSessionIdForDb = index.toString() // Ví dụ đơn giản: 0, 1, 2...
+        contractSessionIdForDb = index.toString()
         console.log(
-          `EventService: Assigning contract_session_id="${contractSessionIdForDb}" for session "${s_in.name}" as it was not provided.`
+          `🔍 EventService: Assigning contract_session_id="${contractSessionIdForDb}" for session "${s_in.name}"`
         )
       }
-      // Kiểm tra xem contractSessionIdForDb có phải là chuỗi số không
+
       if (contractSessionIdForDb && !/^\d+$/.test(contractSessionIdForDb)) {
         console.warn(
-          `EventService: Provided contract_session_id "${
+          `⚠️ EventService: Invalid contract_session_id "${
             s_in.contract_session_id
-          }" for session "${
-            s_in.name
-          }" is not a numeric string. Using index "${index.toString()}" instead.`
+          }" for session "${s_in.name}". Using index "${index.toString()}"`
         )
         contractSessionIdForDb = index.toString()
       }
 
       return {
-        name: s_in.name,
+        name: s_in.name || `${name} - Session ${index + 1}`,
         startTime: Number(s_in.start_time),
         endTime: Number(s_in.end_time),
-        contractSessionId: contractSessionIdForDb // << LƯU contract_session_id
+        contractSessionId: contractSessionIdForDb
       }
     })
 
+    console.log('🔍 EventService: Processed sessions:', mongooseSessions)
+
+    // ✅ CREATE EVENT
     const newEvent = new Event({
-      organizerId: organizer_id,
-      name,
-      description,
-      location,
+      organizerId: organizerId,
+      name: name.trim(),
+      description: description.trim(),
+      location: location?.trim() || '',
       bannerUrlCid,
       sessions: mongooseSessions,
-      seatMapEnabled: seat_map_enabled,
+      seatMapEnabled: Boolean(seat_map_enabled),
       status: EVENT_STATUS_ENUM[0], // DRAFT
-      isActive: false // Mặc định chưa active khi là DRAFT
-      // blockchainEventId sẽ được điền khi PublishEvent
+      isActive: false
+    })
+
+    console.log('🔍 EventService: About to save event:', {
+      organizerId: newEvent.organizerId,
+      name: newEvent.name,
+      description: newEvent.description?.substring(0, 50) + '...',
+      sessionsCount: newEvent.sessions?.length,
+      status: newEvent.status
     })
 
     const savedEvent = await newEvent.save()
     console.log(
-      `EventService: Event DRAFT "${name}" created with DB ID: ${savedEvent.id}`
+      `✅ EventService: Event DRAFT "${name}" created with DB ID: ${savedEvent.id} for organizer: ${organizerId}`
     )
 
-    callback(null, { event: eventToGrpcEvent(savedEvent) })
+    // ✅ RETURN SUCCESS RESPONSE
+    const response = { event: eventToGrpcEvent(savedEvent) }
+    console.log('✅ EventService: Returning response:', response)
+
+    callback(null, response)
   } catch (error) {
-    console.error('EventService: CreateEvent RPC error:', error)
-    // ... (xử lý lỗi validation, duplicate key nếu cần cho các trường khác)
+    console.error('🔥 EventService: CreateEvent RPC error:', error)
+
+    // ✅ BETTER ERROR HANDLING
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(
+        err => err.message
+      )
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: `Validation error: ${validationErrors.join(', ')}`
+      })
+    }
+
+    if (error.code === 11000) {
+      return callback({
+        code: grpc.status.ALREADY_EXISTS,
+        message: 'Event with this information already exists.'
+      })
+    }
+
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to create event draft.'

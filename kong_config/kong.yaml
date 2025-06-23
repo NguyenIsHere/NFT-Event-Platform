@@ -31,6 +31,9 @@ services:
   - name: ipfs-grpc-service
     host: ipfs-service.service.consul
     port: 50058 # Port của ipfs-service
+    connect_timeout: 60000  # 60 seconds
+    write_timeout: 60000    # 60 seconds
+    read_timeout: 60000     # 60 seconds
     protocol: grpc
     plugins:
       - name: grpc-gateway
@@ -41,6 +44,9 @@ services:
     host: event-service.service.consul
     port: 50054 # Port của event-service
     protocol: grpc
+    connect_timeout: 60000  # 60 seconds
+    write_timeout: 60000    # 60 seconds
+    read_timeout: 60000     # 60 seconds
     plugins:
       - name: grpc-gateway
         config:
@@ -145,6 +151,10 @@ routes:
     paths: ["~/v1/events$"] # Khớp chính xác /v1/events cho POST
     methods: [POST]
     strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
  
   - name: event-get-by-id-route-v1 # GET /v1/events/{event_id}
     service: event-grpc-service
