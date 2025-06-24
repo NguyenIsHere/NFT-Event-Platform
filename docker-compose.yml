@@ -6,17 +6,17 @@ services:
       - "8500:8500"
       - "8600:8600/udp"
       - "8600:8600/tcp"
-    command: "agent -server -ui -client=0.0.0.0 -bootstrap-expect=1" # Giữ nguyên command của bạn
+    command: "agent -server -ui -client=0.0.0.0 -bootstrap-expect=1" 
     networks:
       microservices_network:
         ipv4_address: 172.23.0.2
-    healthcheck: # Consul có healthcheck riêng trong Docker Compose
+    healthcheck: 
       test: ["CMD", "curl", "-f", "http://localhost:8500/v1/status/leader"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  ipfs-service: # Service số 8
+  ipfs-service: 
     build:
       context: .
       dockerfile: ./services/08-ipfs-service/Dockerfile
@@ -30,7 +30,7 @@ services:
       consul:
         condition: service_healthy # ipfs-service phụ thuộc Consul healthy
 
-  blockchain-service: # Service số 6
+  blockchain-service: 
     build:
       context: .
       dockerfile: ./services/06-blockchain-service/Dockerfile
@@ -44,7 +44,7 @@ services:
       consul:
         condition: service_healthy # blockchain-service phụ thuộc Consul healthy
 
-  auth-service: # Service số 2
+  auth-service: 
     build:
       context: .
       dockerfile: ./services/02-auth-service/Dockerfile
@@ -56,11 +56,9 @@ services:
       - microservices_network
     depends_on:
       consul:
-        condition: service_healthy # auth-service phụ thuộc Consul healthy
-      # user-service: # Nếu auth-service có gọi user-service lúc khởi tạo (ít khi)
-      #   condition: service_started
+        condition: service_healthy 
 
-  user-service: # Service số 3
+  user-service: 
     build:
       context: .
       dockerfile: ./services/03-user-service/Dockerfile
@@ -72,11 +70,9 @@ services:
       - microservices_network
     depends_on:
       consul:
-        condition: service_healthy # user-service phụ thuộc Consul healthy
-      # auth-service: # Nếu user-service có gọi auth-service lúc khởi tạo (ít khi)
-      #   condition: service_started
+        condition: service_healthy 
 
-  event-service: # Service số 4
+  event-service: 
     build:
       context: .
       dockerfile: ./services/04-event-service/Dockerfile
@@ -90,13 +86,11 @@ services:
       consul:
         condition: service_healthy
       ipfs-service:
-        condition: service_started # Chờ ipfs-service container bắt đầu
+        condition: service_started 
       blockchain-service:
-        condition: service_started # Chờ blockchain-service container bắt đầu
-      # auth-service: # Nếu cần xác thực organizer lúc event-service khởi tạo
-      #   condition: service_started
+        condition: service_started 
 
-  ticket-service: # Service số 5
+  ticket-service: 
     build:
       context: .
       dockerfile: ./services/05-ticket-service/Dockerfile
@@ -110,17 +104,13 @@ services:
       consul:
         condition: service_healthy
       event-service:
-        condition: service_started # Chờ event-service container bắt đầu
+        condition: service_started 
       ipfs-service:
-        condition: service_started # Chờ ipfs-service container bắt đầu
+        condition: service_started 
       blockchain-service:
-        condition: service_started # Chờ blockchain-service container bắt đầu
-      # auth-service: # Nếu cần xác thực người mua lúc ticket-service khởi tạo
-      #   condition: service_started
-      # user-service: # Nếu cần thông tin người mua lúc ticket-service khởi tạo
-      #   condition: service_started
+        condition: service_started
 
-  seatmap-service: # Service số 7
+  seatmap-service: 
     build:
       context: .
       dockerfile: ./services/07-seatmap-service/Dockerfile
@@ -134,11 +124,7 @@ services:
       consul:
         condition: service_healthy
       event-service:
-        condition: service_started # Chờ event-service container bắt đầu
-      # auth-service: # Nếu cần xác thực người mua lúc ticket-service khởi tạo
-      #   condition: service_started
-      # user-service: # Nếu cần thông tin người mua lúc ticket-service khởi tạo
-      #   condition: service_started
+        condition: service_started 
 
   kong-gateway-infra:
     image: kong:3.7
@@ -155,19 +141,19 @@ services:
       KONG_SHARED_JWT_SECRET: ${KONG_SHARED_JWT_SECRET}
       KONG_DNS_RESOLVER: '172.23.0.2:8600'
       KONG_DNS_ORDER: 'LAST,SRV,A,CNAME'
-      # ✅ NGINX DIRECTIVES CHO LARGE REQUEST BODY
+      # NGINX DIRECTIVES CHO LARGE REQUEST BODY
       KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE: "10m"
       KONG_NGINX_HTTP_CLIENT_BODY_BUFFER_SIZE: "10m"
       KONG_NGINX_HTTP_CLIENT_BODY_TIMEOUT: "60s"
       KONG_NGINX_HTTP_CLIENT_HEADER_TIMEOUT: "60s"
-      # ✅ PROXY SETTINGS CHO GRPC
+      # PROXY SETTINGS CHO GRPC
       KONG_NGINX_HTTP_PROXY_REQUEST_BUFFERING: "on"
       KONG_NGINX_HTTP_PROXY_BUFFERING: "on"
       KONG_NGINX_HTTP_PROXY_BUFFER_SIZE: "8k"
       KONG_NGINX_HTTP_PROXY_BUFFERS: "16 8k"
       KONG_NGINX_HTTP_PROXY_READ_TIMEOUT: "60s"
       KONG_NGINX_HTTP_PROXY_SEND_TIMEOUT: "60s"
-      # ✅ GRPC SPECIFIC SETTINGS
+      # GRPC SPECIFIC SETTINGS
       KONG_NGINX_HTTP_GRPC_READ_TIMEOUT: "60s"
       KONG_NGINX_HTTP_GRPC_SEND_TIMEOUT: "60s"
     dns:
@@ -185,21 +171,21 @@ services:
       - microservices_network
     depends_on: # Kong phụ thuộc vào tất cả các service và Consul
       consul:
-        condition: service_healthy # Chờ Consul healthy
+        condition: service_healthy 
       auth-service:
-        condition: service_started # Chờ container auth-service bắt đầu
+        condition: service_started 
       user-service:
-        condition: service_started # Chờ container user-service bắt đầu
+        condition: service_started 
       ipfs-service:
-        condition: service_started # Chờ container ipfs-service bắt đầu
+        condition: service_started 
       event-service:
-        condition: service_started # Chờ container event-service bắt đầu
+        condition: service_started 
       ticket-service:
-        condition: service_started # Chờ container ticket-service bắt đầu
+        condition: service_started 
       blockchain-service:
-        condition: service_started # Chờ container blockchain-service bắt đầu
+        condition: service_started 
       seatmap-service:
-        condition: service_started # Chờ container seatmap-service bắt đầu
+        condition: service_started 
 
 networks:
   microservices_network:
