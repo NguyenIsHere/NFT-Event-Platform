@@ -57,6 +57,8 @@ services:
     depends_on:
       consul:
         condition: service_healthy 
+      user-service:
+        condition: service_started 
 
   user-service: 
     build:
