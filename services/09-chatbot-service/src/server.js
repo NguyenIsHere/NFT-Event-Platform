@@ -101,6 +101,14 @@ async function main () {
     process.exit(1)
   }
 
+  // Test embedding service
+  try {
+    const { testEmbeddingModels } = require('./services/embeddingService')
+    await testEmbeddingModels()
+  } catch (error) {
+    console.warn('Embedding model test failed:', error.message)
+  }
+
   // Initialize Vector Database
   console.log('Initializing vector database...')
   await initializeVectorDB()

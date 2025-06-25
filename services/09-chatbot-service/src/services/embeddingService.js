@@ -1,9 +1,17 @@
-const axios = require('axios')
+const { GoogleGenAI } = require('@google/genai')
 
-// Sử dụng Google Embedding API
-const EMBEDDING_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent'
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+
+// Initialize GoogleGenAI client
+let genAI = null
+
+function initializeGenAI () {
+  if (!genAI && GEMINI_API_KEY) {
+    genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY })
+    console.log('Google GenAI client initialized')
+  }
+  return genAI
+}
 
 async function generateEmbedding (text) {
   try {
@@ -11,47 +19,85 @@ async function generateEmbedding (text) {
       throw new Error('Text cannot be empty')
     }
 
-    // Sử dụng Google Embedding API
-    const response = await axios.post(
-      `${EMBEDDING_API_URL}?key=${GEMINI_API_KEY}`,
-      {
-        model: 'models/embedding-001',
-        content: {
-          parts: [
-            {
-              text: text
-            }
-          ]
-        }
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000
-      }
-    )
+    // Initialize GenAI client if not already done
+    const ai = initializeGenAI()
+    if (!ai) {
+      throw new Error('Google GenAI client not initialized - missing API key')
+    }
 
-    if (response.data?.embedding?.values) {
-      const embedding = response.data.embedding.values
+    console.log('Generating embedding with Google GenAI SDK...')
+
+    // Sử dụng model mới nhất: text-embedding-004
+    const response = await ai.models.embedContent({
+      model: 'text-embedding-004', // Hoặc 'gemini-embedding-exp-03-07'
+      contents: text,
+      config: {
+        taskType: 'SEMANTIC_SIMILARITY' // Phù hợp cho chatbot search
+        // Có thể thêm các config khác:
+        // outputDimensionality: 768 // Nếu muốn control dimension
+      }
+    })
+
+    if (response?.embeddings?.[0]?.values) {
+      const embedding = response.embeddings[0].values
       console.log(`Generated embedding with dimension: ${embedding.length}`)
       return embedding
     } else {
-      throw new Error('Invalid embedding response')
+      throw new Error('Invalid embedding response structure')
     }
   } catch (error) {
-    console.error(
-      'Error generating embedding:',
-      error.response?.data || error.message
-    )
+    console.error('Error generating embedding with GenAI SDK:', error.message)
 
-    // Fallback: tạo dummy embedding với đúng dimension
+    // Fallback: tạo dummy embedding
     console.warn('Using fallback embedding generation')
-    return generateDummyEmbedding(text, 768) // Google Embedding API dimension
+    return generateDummyEmbedding(text, 768) // Default dimension
   }
 }
 
-// Fallback embedding generator với dimension chuẩn
+// Alternative function using different models
+async function generateEmbeddingWithModel (
+  text,
+  modelName = 'text-embedding-004'
+) {
+  try {
+    if (!text || text.trim().length === 0) {
+      throw new Error('Text cannot be empty')
+    }
+
+    const ai = initializeGenAI()
+    if (!ai) {
+      throw new Error('Google GenAI client not initialized')
+    }
+
+    console.log(`Generating embedding with model: ${modelName}`)
+
+    const response = await ai.models.embedContent({
+      model: modelName, // 'text-embedding-004', 'gemini-embedding-exp-03-07', 'embedding-001'
+      contents: text,
+      config: {
+        taskType: 'SEMANTIC_SIMILARITY'
+      }
+    })
+
+    if (response?.embeddings?.[0]?.values) {
+      const embedding = response.embeddings[0].values
+      console.log(
+        `Generated embedding with dimension: ${embedding.length} using ${modelName}`
+      )
+      return embedding
+    } else {
+      throw new Error('Invalid embedding response structure')
+    }
+  } catch (error) {
+    console.error(
+      `Error generating embedding with ${modelName}:`,
+      error.message
+    )
+    throw error
+  }
+}
+
+// Fallback embedding generator
 function generateDummyEmbedding (text, dimension = 768) {
   const embedding = new Array(dimension).fill(0)
 
@@ -72,42 +118,92 @@ function generateDummyEmbedding (text, dimension = 768) {
 async function generateBatchEmbeddings (texts) {
   const embeddings = []
 
-  console.log(`Generating embeddings for ${texts.length} texts...`)
+  console.log(
+    `Generating embeddings for ${texts.length} texts using Google GenAI SDK...`
+  )
 
-  // Process in batches to avoid rate limits
-  const batchSize = 5
+  // Process in smaller batches để tránh rate limits
+  const batchSize = 3 // Giảm batch size cho GenAI SDK
+
   for (let i = 0; i < texts.length; i += batchSize) {
     const batch = texts.slice(i, i + batchSize)
-    const batchPromises = batch.map(text => generateEmbedding(text))
+    console.log(
+      `Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(
+        texts.length / batchSize
+      )}`
+    )
 
     try {
-      const batchResults = await Promise.all(batchPromises)
-      embeddings.push(...batchResults)
+      // Process batch sequentially để tránh rate limit
+      for (const text of batch) {
+        try {
+          const embedding = await generateEmbedding(text)
+          embeddings.push(embedding)
+
+          // Small delay between requests
+          await new Promise(resolve => setTimeout(resolve, 200)) // 200ms delay
+        } catch (error) {
+          console.error(
+            `Error processing individual text in batch:`,
+            error.message
+          )
+          // Add fallback embedding for failed text
+          embeddings.push(generateDummyEmbedding('fallback', 768))
+        }
+      }
 
       console.log(
-        `Generated embeddings for batch ${
-          Math.floor(i / batchSize) + 1
-        }/${Math.ceil(texts.length / batchSize)}`
+        `Completed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(
+          texts.length / batchSize
+        )}`
       )
 
-      // Rate limiting
+      // Larger delay between batches
       if (i + batchSize < texts.length) {
         await new Promise(resolve => setTimeout(resolve, 1000)) // 1 second delay
       }
     } catch (error) {
-      console.error(`Error processing batch ${i}-${i + batchSize}:`, error)
-      // Add dummy embeddings for failed batch
+      console.error(
+        `Error processing batch ${i}-${i + batchSize}:`,
+        error.message
+      )
+      // Add dummy embeddings for entire failed batch
       batch.forEach(() =>
         embeddings.push(generateDummyEmbedding('fallback', 768))
       )
     }
   }
 
-  console.log(`Generated ${embeddings.length} embeddings`)
+  console.log(
+    `Generated ${embeddings.length} embeddings using Google GenAI SDK`
+  )
   return embeddings
+}
+
+// Utility function để test các models khác nhau
+async function testEmbeddingModels (sampleText = 'Test embedding generation') {
+  const models = [
+    'text-embedding-004',
+    'gemini-embedding-exp-03-07',
+    'embedding-001'
+  ]
+
+  console.log('Testing different embedding models...')
+
+  for (const model of models) {
+    try {
+      const embedding = await generateEmbeddingWithModel(sampleText, model)
+      console.log(`✅ ${model}: dimension ${embedding.length}`)
+    } catch (error) {
+      console.log(`❌ ${model}: failed - ${error.message}`)
+    }
+  }
 }
 
 module.exports = {
   generateEmbedding,
-  generateBatchEmbeddings
+  generateBatchEmbeddings,
+  generateEmbeddingWithModel,
+  testEmbeddingModels,
+  initializeGenAI
 }
