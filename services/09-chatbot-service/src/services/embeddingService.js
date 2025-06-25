@@ -1,6 +1,6 @@
 const axios = require('axios')
 
-// Sử dụng Google Embedding API hoặc local model
+// Sử dụng Google Embedding API
 const EMBEDDING_API_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent'
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
@@ -33,7 +33,9 @@ async function generateEmbedding (text) {
     )
 
     if (response.data?.embedding?.values) {
-      return response.data.embedding.values
+      const embedding = response.data.embedding.values
+      console.log(`Generated embedding with dimension: ${embedding.length}`)
+      return embedding
     } else {
       throw new Error('Invalid embedding response')
     }
@@ -43,13 +45,13 @@ async function generateEmbedding (text) {
       error.response?.data || error.message
     )
 
-    // Fallback: tạo dummy embedding (trong production nên dùng model khác)
+    // Fallback: tạo dummy embedding với đúng dimension
     console.warn('Using fallback embedding generation')
-    return generateDummyEmbedding(text)
+    return generateDummyEmbedding(text, 768) // Google Embedding API dimension
   }
 }
 
-// Fallback embedding generator (simple hash-based)
+// Fallback embedding generator với dimension chuẩn
 function generateDummyEmbedding (text, dimension = 768) {
   const embedding = new Array(dimension).fill(0)
 
@@ -70,6 +72,8 @@ function generateDummyEmbedding (text, dimension = 768) {
 async function generateBatchEmbeddings (texts) {
   const embeddings = []
 
+  console.log(`Generating embeddings for ${texts.length} texts...`)
+
   // Process in batches to avoid rate limits
   const batchSize = 5
   for (let i = 0; i < texts.length; i += batchSize) {
@@ -80,17 +84,26 @@ async function generateBatchEmbeddings (texts) {
       const batchResults = await Promise.all(batchPromises)
       embeddings.push(...batchResults)
 
+      console.log(
+        `Generated embeddings for batch ${
+          Math.floor(i / batchSize) + 1
+        }/${Math.ceil(texts.length / batchSize)}`
+      )
+
       // Rate limiting
       if (i + batchSize < texts.length) {
-        await new Promise(resolve => setTimeout(resolve, 100))
+        await new Promise(resolve => setTimeout(resolve, 1000)) // 1 second delay
       }
     } catch (error) {
       console.error(`Error processing batch ${i}-${i + batchSize}:`, error)
       // Add dummy embeddings for failed batch
-      batch.forEach(() => embeddings.push(generateDummyEmbedding('fallback')))
+      batch.forEach(() =>
+        embeddings.push(generateDummyEmbedding('fallback', 768))
+      )
     }
   }
 
+  console.log(`Generated ${embeddings.length} embeddings`)
   return embeddings
 }
 
