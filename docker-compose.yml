@@ -126,7 +126,27 @@ services:
       consul:
         condition: service_healthy
       event-service:
-        condition: service_started 
+        condition: service_started
+    
+  chatbot-service:
+    build:
+      context: .
+      dockerfile: ./services/09-chatbot-service/Dockerfile
+    container_name: chatbot_service
+    env_file:
+      - ./services/09-chatbot-service/.env
+    dns: ["172.23.0.2", "8.8.8.8", "1.1.1.1"]
+    networks:
+      - microservices_network
+    depends_on:
+      consul:
+        condition: service_healthy
+      event-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+      ticket-service:
+        condition: service_started
 
   kong-gateway-infra:
     image: kong:3.7
@@ -188,6 +208,8 @@ services:
         condition: service_started 
       seatmap-service:
         condition: service_started 
+      chatbot-service:
+        condition: service_started
 
 networks:
   microservices_network:
