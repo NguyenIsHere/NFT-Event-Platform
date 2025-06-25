@@ -298,8 +298,16 @@ routes:
   # ✅ === CHATBOT SERVICE ROUTES ===
   - name: chatbot-chat-route-v1
     service: chatbot-grpc-service
-    paths: ["~/api/v1/chat$"]  # Theo proto của bạn
+    paths: ["~/v1/chat$"]  # Theo proto của bạn
     methods: [POST]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+  - name: chatbot-history-route-v1
+    service: chatbot-grpc-service
+    paths: ["~/v1/chat/history$"]
+    methods: [GET]
     strip_path: false
     plugins:
       - name: jwt
