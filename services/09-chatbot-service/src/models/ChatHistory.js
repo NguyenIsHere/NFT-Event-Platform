@@ -71,30 +71,22 @@ async function saveChatMessage (chatData) {
   }
 }
 
-async function GetChatHistory (call, callback) {
+async function getChatHistory (userId, sessionId, limit = 50) {
   try {
-    const { getChatHistory } = require('../models/ChatHistory')
-    const { user_id, session_id, limit } = call.request
+    const query = { userId }
+    if (sessionId) {
+      query.sessionId = sessionId
+    }
 
-    const messages = await getChatHistory(user_id, session_id, limit || 50)
+    const messages = await ChatHistory.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean()
 
-    callback(null, {
-      messages: messages.map(msg => ({
-        id: msg.id,
-        user_id: msg.userId,
-        session_id: msg.sessionId,
-        message: msg.message,
-        response: msg.response,
-        timestamp: Math.floor(new Date(msg.createdAt).getTime() / 1000),
-        detected_filters: msg.detectedFilters || [] // ✅ Include detected filters
-      }))
-    })
+    return messages.reverse() // Return in chronological order
   } catch (error) {
-    console.error('ChatbotService: GetChatHistory error:', error)
-    callback({
-      code: grpc.status.INTERNAL,
-      message: error.message || 'Failed to get chat history'
-    })
+    console.error('Error getting chat history:', error)
+    throw error
   }
 }
 

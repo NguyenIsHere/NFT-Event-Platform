@@ -158,7 +158,8 @@ async function GetChatHistory (call, callback) {
         session_id: msg.sessionId,
         message: msg.message,
         response: msg.response,
-        timestamp: Math.floor(new Date(msg.createdAt).getTime() / 1000)
+        timestamp: Math.floor(new Date(msg.createdAt).getTime() / 1000),
+        detected_filters: msg.detectedFilters || [] // ✅ Include detected filters
       }))
     })
   } catch (error) {
