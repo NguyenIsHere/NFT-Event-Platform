@@ -7,13 +7,25 @@ import "google/api/annotations.proto";
 service ChatbotService {
   rpc Chat(ChatRequest) returns (ChatResponse) {
     option (google.api.http) = {
-      post: "/api/v1/chat"
+      post: "/v1/chat"
       body: "*"
     };
   }
   
-  rpc IndexData(IndexDataRequest) returns (IndexDataResponse);
-  rpc GetChatHistory(ChatHistoryRequest) returns (ChatHistoryResponse);
+// ✅ THÊM: HTTP annotation cho GetChatHistory
+  rpc GetChatHistory(ChatHistoryRequest) returns (ChatHistoryResponse) {
+    option (google.api.http) = {
+      get: "/v1/chat/history"
+    };
+  }
+  
+  // ✅ THÊM: HTTP annotation cho IndexData
+  rpc IndexData(IndexDataRequest) returns (IndexDataResponse) {
+    option (google.api.http) = {
+      post: "/v1/chat/index"
+      body: "*"
+    };
+  }
 }
 
 message ChatRequest {
