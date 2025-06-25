@@ -11,6 +11,12 @@ const {
   generateQRCodeImage
 } = require('../utils/qrCodeUtils')
 
+const {
+  GetEventDashboard,
+  GetOrganizerStats,
+  GetCheckinAnalytics
+} = require('./analyticsHandlers')
+
 // Helper function ticketDocumentToGrpcTicket (giữ nguyên như trước)
 function ticketDocumentToGrpcTicket (ticketDoc) {
   if (!ticketDoc) return null
@@ -979,5 +985,8 @@ module.exports = {
   GetTicket,
   ListTicketsByEvent,
   ListTicketsByOwner,
-  ListAllTickets
+  ListAllTickets,
+  GetEventDashboard,
+  GetOrganizerStats,
+  GetCheckinAnalytics
 }

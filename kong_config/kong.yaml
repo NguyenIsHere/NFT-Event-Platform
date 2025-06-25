@@ -257,6 +257,33 @@ routes:
     paths: ["~/v1/tickets/(?<ticket_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
+  
+  - name: ticket-analytics-dashboard-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/events/[^/]+/analytics/dashboard$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: organizer-analytics-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/organizers/[^/]+/analytics$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: checkin-analytics-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/events/[^/]+/analytics/checkin$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
   # === SeatMap Service Routes ===
   - name: seatmap-create-for-event-route-v1
