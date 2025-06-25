@@ -1,6 +1,4 @@
 require('dotenv').config()
-const express = require('express')
-const cors = require('cors')
 const grpc = require('@grpc/grpc-js')
 const protoLoader = require('@grpc/proto-loader')
 const mongoose = require('mongoose')
@@ -87,19 +85,6 @@ const statusMap = {
   [SERVICE_NAME]: 'NOT_SERVING'
 }
 const healthImplementation = new HealthImplementation(statusMap)
-
-// ...existing code...
-
-// HTTP endpoints
-app.post('/chat', chatbotHandlers.handleChatHTTP)
-app.post('/index-data', chatbotHandlers.handleIndexDataHTTP)
-app.get('/chat-history/:userId', chatbotHandlers.handleGetChatHistoryHTTP)
-app.get('/vector-stats', chatbotHandlers.handleVectorStatsHTTP) // ← THÊM endpoint này
-app.get('/health', (req, res) =>
-  res.json({ status: 'healthy', service: SERVICE_NAME })
-)
-
-// ...existing code...
 
 async function main () {
   // Connect to MongoDB

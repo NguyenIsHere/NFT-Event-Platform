@@ -2,7 +2,6 @@ const grpc = require('@grpc/grpc-js')
 const { generateResponse } = require('../services/geminiService')
 const { searchSimilarContent } = require('../services/ragService')
 const { saveChatMessage } = require('../models/ChatHistory')
-const { getIndexStats } = require('../utils/vectorUtils')
 const { v4: uuidv4 } = require('uuid')
 
 async function Chat (call, callback) {
@@ -119,26 +118,8 @@ async function GetChatHistory (call, callback) {
   }
 }
 
-// HTTP endpoint để kiểm tra vector database stats
-async function handleVectorStatsHTTP (req, res) {
-  try {
-    const stats = await getIndexStats()
-    res.json({
-      success: true,
-      stats
-    })
-  } catch (error) {
-    console.error('Error getting vector stats:', error)
-    res.status(500).json({
-      success: false,
-      error: error.message
-    })
-  }
-}
-
 module.exports = {
   Chat,
   IndexData,
-  GetChatHistory,
-  handleVectorStatsHTTP
+  GetChatHistory
 }

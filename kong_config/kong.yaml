@@ -12,7 +12,7 @@ consumers:
 services:
   - name: auth-grpc-service
     host: auth-service.service.consul
-    port: 50052 # Port của auth-service
+    port: 50052
     protocol: grpc
     plugins:
       - name: grpc-gateway
@@ -21,7 +21,7 @@ services:
 
   - name: user-grpc-service
     host: user-service.service.consul
-    port: 50053 # Port của user-service
+    port: 50053
     protocol: grpc
     plugins:
       - name: grpc-gateway
@@ -30,10 +30,10 @@ services:
   
   - name: ipfs-grpc-service
     host: ipfs-service.service.consul
-    port: 50058 # Port của ipfs-service
-    connect_timeout: 60000  # 60 seconds
-    write_timeout: 60000    # 60 seconds
-    read_timeout: 60000     # 60 seconds
+    port: 50058
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
     protocol: grpc
     plugins:
       - name: grpc-gateway
@@ -42,11 +42,11 @@ services:
 
   - name: event-grpc-service
     host: event-service.service.consul
-    port: 50054 # Port của event-service
+    port: 50054
     protocol: grpc
-    connect_timeout: 60000  # 60 seconds
-    write_timeout: 60000    # 60 seconds
-    read_timeout: 60000     # 60 seconds
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
     plugins:
       - name: grpc-gateway
         config:
@@ -54,7 +54,7 @@ services:
 
   - name: ticket-grpc-service
     host: ticket-service.service.consul
-    port: 50055 # Port của ticket-service
+    port: 50055
     protocol: grpc
     plugins:
       - name: grpc-gateway
@@ -63,61 +63,69 @@ services:
   
   - name: seatmap-grpc-service
     host: seatmap-service.service.consul
-    port: 50057 # Port của seatmap-service
+    port: 50057
     protocol: grpc
     plugins:
       - name: grpc-gateway
         config:
           proto: /etc/kong/protos/seatmap.proto
 
+  # ✅ THÊM CHATBOT SERVICE
+  - name: chatbot-grpc-service
+    host: chatbot-service.service.consul
+    port: 50059
+    protocol: grpc
+    connect_timeout: 60000  # Chat có thể mất thời gian với AI processing
+    write_timeout: 60000
+    read_timeout: 60000
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /etc/kong/protos/chatbot.proto
+
 # --- Routes ---
 routes:
   # === Auth Service Routes ===
-  # Các path này khá đơn giản, không nhất thiết cần regex phức tạp
-  # nhưng ta có thể dùng regex để khớp chính xác nếu muốn.
   - name: auth-login-route-v1
     service: auth-grpc-service
-    paths: ["~/v1/auth/login$"] # Regex: khớp chính xác /v1/auth/login
+    paths: ["~/v1/auth/login$"]
     methods: [POST]
     strip_path: false
 
   - name: auth-register-route-v1
     service: auth-grpc-service
-    paths: ["~/v1/auth/register$"] # Regex: khớp chính xác /v1/auth/register
+    paths: ["~/v1/auth/register$"]
     methods: [POST]
     strip_path: false
 
   - name: auth-refresh-token-route-v1
     service: auth-grpc-service
-    paths: ["~/v1/auth/refresh-token$"] # Regex: khớp chính xác /v1/auth/refresh-token
+    paths: ["~/v1/auth/refresh-token$"]
     methods: [POST]
     strip_path: false
 
-
   # === User Service Routes ===
-  # Ưu tiên các path cụ thể hơn (by-email, by-wallet) trước path có tham số chung (user_id)
   - name: user-get-by-email-route-v1
     service: user-grpc-service
-    paths: ["~/v1/users/by-email$"] # Regex: khớp chính xác, query param sẽ được grpc-gateway xử lý
+    paths: ["~/v1/users/by-email$"]
     methods: [GET]
     strip_path: false
- # Ưu tiên cao hơn route user_id
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
   - name: user-get-by-wallet-route-v1
     service: user-grpc-service
-    # Regex: /v1/users/by-wallet/ theo sau là một chuỗi không chứa dấu / (địa chỉ ví)
-    paths: ["~/v1/users/by-wallet/(?<wallet_address>[^/]+)$"] 
+    paths: ["~/v1/users/by-wallet/(?<wallet_address>[^/]+)$"]
     methods: [GET]
     strip_path: false
- # Ưu tiên cao hơn route user_id
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
   - name: user-get-by-id-route-v1
     service: user-grpc-service
-    paths: ["~/v1/users/(?<user_id>[^/]+)$"] 
+    paths: ["~/v1/users/(?<user_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
     plugins:
@@ -137,55 +145,50 @@ routes:
     methods: [POST]
     strip_path: false
 
-
   # === Event Service Routes ===
-  # Ưu tiên path cụ thể {event_id}/publish trước path chung {event_id} cho GET
   - name: event-publish-route-v1
     service: event-grpc-service
     paths: ["~/v1/events/(?<event_id>[^/]+)/publish$"]
     methods: [POST]
     strip_path: false
 
-  - name: event-create-route-v1 # POST /v1/events
+  - name: event-create-route-v1
     service: event-grpc-service
-    paths: ["~/v1/events$"] # Khớp chính xác /v1/events cho POST
+    paths: ["~/v1/events$"]
     methods: [POST]
     strip_path: false
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
- 
-  - name: event-get-by-id-route-v1 # GET /v1/events/{event_id}
+  - name: event-get-by-id-route-v1
     service: event-grpc-service
     paths: ["~/v1/events/(?<event_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
- # Thấp hơn POST /v1/events và GET /v1/events (list)
-  - name: event-list-route-v1 # GET /v1/events
+
+  - name: event-list-route-v1
     service: event-grpc-service
-    paths: ["~/v1/events$"] # Khớp chính xác /v1/events cho GET
+    paths: ["~/v1/events$"]
     methods: [GET]
     strip_path: false
- 
 
   # === Ticket & TicketType Service Routes ===
-  # TicketTypeService Routes - ưu tiên các path có nhiều segment hơn hoặc cụ thể hơn
   - name: tickettype-create-route-v1
     service: ticket-grpc-service
-    paths: ["~/v1/ticket-types/create$"] # Path đã sửa theo proto của bạn
+    paths: ["~/v1/ticket-types/create$"]
     methods: [POST]
     strip_path: false
 
   - name: tickettype-list-by-session-route-v1
     service: ticket-grpc-service
-    paths: ["~/v1/ticket-types/by-session/(?<event_id>[^/]+)/(?<session_id>[^/]+)$"] # Path đã sửa
+    paths: ["~/v1/ticket-types/by-session/(?<event_id>[^/]+)/(?<session_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
 
   - name: tickettype-list-by-event-route-v1
     service: ticket-grpc-service
-    paths: ["~/v1/ticket-types/by-event/(?<event_id>[^/]+)$"] # Path đã sửa
+    paths: ["~/v1/ticket-types/by-event/(?<event_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
 
@@ -201,9 +204,6 @@ routes:
     methods: [GET]
     strip_path: false
 
-  
-  # TicketService Routes
-  # ✅ CRITICAL: Đặt ALL specific routes TRƯỚC generic {ticket_id} route
   - name: ticket-list-all-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/all$"]
@@ -252,7 +252,6 @@ routes:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
-  # ✅ CRITICAL: Generic route PHẢI có priority THẤP NHẤT
   - name: ticket-get-by-id-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/(?<ticket_id>[^/]+)$"]
@@ -260,56 +259,48 @@ routes:
     strip_path: false
 
   # === SeatMap Service Routes ===
-  # Lưu ý: event_id và seat_map_id thường là MongoDB ObjectId (24 ký tự hex)
-  # Regex [^/]+ sẽ khớp với bất kỳ ký tự nào trừ dấu /
-  # Bạn có thể làm regex chặt chẽ hơn nếu muốn, ví dụ: (?<event_id>[0-9a-f]{24})
-
-  # RPC CreateSeatMap(CreateSeatMapRequest) returns (SeatMapResponse)
-  # post: "/v1/events/{event_id}/seatmap"
   - name: seatmap-create-for-event-route-v1
     service: seatmap-grpc-service
     paths: ["~/v1/events/(?<event_id>[^/]+)/seatmap$"]
     methods: [POST]
     strip_path: false
 
-  # RPC GetSeatMapByEvent(GetSeatMapByEventRequest) returns (SeatMapResponse)
-  # get: "/v1/events/{event_id}/seatmap"
   - name: seatmap-get-by-event-route-v1
     service: seatmap-grpc-service
     paths: ["~/v1/events/(?<event_id>[^/]+)/seatmap$"]
     methods: [GET]
     strip_path: false
 
-  # RPC GetSeatMap(GetSeatMapRequest) returns (SeatMapResponse)
-  # get: "/v1/seatmaps/{seat_map_id}"
   - name: seatmap-get-by-id-route-v1
     service: seatmap-grpc-service
     paths: ["~/v1/seatmaps/(?<seat_map_id>[^/]+)$"]
     methods: [GET]
     strip_path: false
 
-  # RPC UpdateSeatMap(UpdateSeatMapRequest) returns (SeatMapResponse)
-  # put: "/v1/seatmaps/{seat_map_id}"
   - name: seatmap-update-route-v1
     service: seatmap-grpc-service
     paths: ["~/v1/seatmaps/(?<seat_map_id>[^/]+)$"]
     methods: [PUT]
     strip_path: false
 
-  # RPC DeleteSeatMap(DeleteSeatMapRequest) returns (google.protobuf.Empty)
-  # delete: "/v1/seatmaps/{seat_map_id}"
   - name: seatmap-delete-route-v1
     service: seatmap-grpc-service
     paths: ["~/v1/seatmaps/(?<seat_map_id>[^/]+)$"]
     methods: [DELETE]
     strip_path: false
 
-  # RPC ListSeatMaps(ListSeatMapsRequest) returns (ListSeatMapsResponse)
-  # get: "/v1/seatmaps" (sẽ dùng query param ?event_id=...)
   - name: seatmap-list-route-v1
     service: seatmap-grpc-service
-    paths: ["~/v1/seatmaps$"] # Khớp chính xác /v1/seatmaps
+    paths: ["~/v1/seatmaps$"]
     methods: [GET]
     strip_path: false
 
-
+  # ✅ === CHATBOT SERVICE ROUTES ===
+  - name: chatbot-chat-route-v1
+    service: chatbot-grpc-service
+    paths: ["~/api/v1/chat$"]  # Theo proto của bạn
+    methods: [POST]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
