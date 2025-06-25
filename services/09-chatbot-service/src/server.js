@@ -15,7 +15,7 @@ const { initializeVectorDB } = require('./utils/vectorUtils')
 const {
   indexExistingData,
   schedulePeriodicIndexing
-} = require('./services/dataIndexerService')
+} = require('./services/dataIndexer')
 
 // Import từ grpc-health-check
 const healthCheck = require('grpc-health-check')

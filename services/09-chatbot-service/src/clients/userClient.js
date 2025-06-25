@@ -40,12 +40,13 @@ class UserClient {
 
   async getUserById (userId) {
     return new Promise((resolve, reject) => {
-      this.client.GetUserById({ id: userId }, (error, response) => {
+      this.client.GetUserById({ user_id: userId }, (error, response) => {
+        // ← SỬA: đổi id thành user_id
         if (error) {
           console.error('ChatbotService UserClient: Error getting user:', error)
           resolve(null)
         } else {
-          resolve(response.user || response) // Có thể response trực tiếp là user object
+          resolve(response) // ← SỬA: user.proto trả về UserResponse trực tiếp, không có .user
         }
       })
     })
@@ -53,33 +54,21 @@ class UserClient {
 
   async getAllUsers () {
     return new Promise((resolve, reject) => {
-      this.client.GetAllUsers({}, (error, response) => {
-        if (error) {
-          console.error(
-            'ChatbotService UserClient: Error getting all users:',
-            error
-          )
-          reject(error)
-        } else {
-          resolve(response.users || [])
-        }
-      })
+      // User service không có GetAllUsers method, return empty array
+      console.warn(
+        'ChatbotService UserClient: GetAllUsers not available in UserService proto'
+      )
+      resolve([])
     })
   }
 
   async searchUsers (query) {
     return new Promise((resolve, reject) => {
-      this.client.SearchUsers({ query }, (error, response) => {
-        if (error) {
-          console.error(
-            'ChatbotService UserClient: Error searching users:',
-            error
-          )
-          resolve([])
-        } else {
-          resolve(response.users || [])
-        }
-      })
+      // User service không có SearchUsers method, return empty array
+      console.warn(
+        'ChatbotService UserClient: SearchUsers not available in UserService proto'
+      )
+      resolve([])
     })
   }
 }

@@ -40,13 +40,14 @@ class EventClient {
 
   async getEventById (eventId) {
     return new Promise((resolve, reject) => {
-      this.client.GetEvent({ id: eventId }, (error, response) => {
+      this.client.GetEvent({ event_id: eventId }, (error, response) => {
+        // ← SỬA: đổi id thành event_id
         if (error) {
           console.error(
             'ChatbotService EventClient: Error getting event:',
             error
           )
-          resolve(null) // Return null instead of rejecting để không break flow
+          resolve(null)
         } else {
           resolve(response.event)
         }
@@ -56,7 +57,8 @@ class EventClient {
 
   async getAllEvents () {
     return new Promise((resolve, reject) => {
-      this.client.GetAllEvents({}, (error, response) => {
+      this.client.ListEvents({}, (error, response) => {
+        // ← SỬA: đổi từ GetAllEvents thành ListEvents
         if (error) {
           console.error(
             'ChatbotService EventClient: Error getting all events:',
@@ -72,15 +74,24 @@ class EventClient {
 
   async searchEvents (query) {
     return new Promise((resolve, reject) => {
-      this.client.SearchEvents({ query }, (error, response) => {
+      // Event service không có SearchEvents method, sử dụng ListEvents với filter
+      this.client.ListEvents({}, (error, response) => {
         if (error) {
           console.error(
             'ChatbotService EventClient: Error searching events:',
             error
           )
-          resolve([]) // Return empty array instead of rejecting
+          resolve([])
         } else {
-          resolve(response.events || [])
+          // Filter events locally based on query
+          const allEvents = response.events || []
+          const filteredEvents = allEvents.filter(
+            event =>
+              event.name?.toLowerCase().includes(query.toLowerCase()) ||
+              event.description?.toLowerCase().includes(query.toLowerCase()) ||
+              event.location?.toLowerCase().includes(query.toLowerCase())
+          )
+          resolve(filteredEvents)
         }
       })
     })
@@ -88,7 +99,8 @@ class EventClient {
 
   async getEventsByArtist (artist) {
     return new Promise((resolve, reject) => {
-      this.client.GetEventsByArtist({ artist }, (error, response) => {
+      // Event service không có GetEventsByArtist method, sử dụng ListEvents với filter
+      this.client.ListEvents({}, (error, response) => {
         if (error) {
           console.error(
             'ChatbotService EventClient: Error getting events by artist:',
@@ -96,7 +108,13 @@ class EventClient {
           )
           resolve([])
         } else {
-          resolve(response.events || [])
+          // Filter events locally based on artist - nhưng Event proto không có artist field
+          // Có thể filter theo organizer_id hoặc description
+          const allEvents = response.events || []
+          const filteredEvents = allEvents.filter(event =>
+            event.description?.toLowerCase().includes(artist.toLowerCase())
+          )
+          resolve(filteredEvents)
         }
       })
     })

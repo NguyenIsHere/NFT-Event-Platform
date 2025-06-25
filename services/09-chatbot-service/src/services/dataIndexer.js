@@ -51,8 +51,7 @@ async function indexEvents (forceReindex = false) {
 
     // Prepare texts for embedding
     const eventTexts = events.map(
-      event =>
-        `${event.name} ${event.description} ${event.artist} ${event.location}`
+      event => `${event.name} ${event.description} ${event.location}` // ← SỬA: bỏ artist
     )
 
     // Generate embeddings
@@ -66,11 +65,11 @@ async function indexEvents (forceReindex = false) {
         id: event.id,
         type: 'event',
         title: event.name,
-        content: `Sự kiện: ${event.name}. Mô tả: ${event.description}. Ca sĩ: ${event.artist}. Địa điểm: ${event.location}`,
-        artist: event.artist,
+        content: `Sự kiện: ${event.name}. Mô tả: ${event.description}. Địa điểm: ${event.location}`, // ← SỬA: bỏ artist, date
         location: event.location,
-        date: event.date,
-        price: event.ticket_price
+        organizer_id: event.organizer_id,
+        status: event.status,
+        is_active: event.is_active
       }
     }))
 

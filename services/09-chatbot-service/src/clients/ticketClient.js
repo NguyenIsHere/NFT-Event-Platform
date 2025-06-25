@@ -40,7 +40,8 @@ class TicketClient {
 
   async getTicketById (ticketId) {
     return new Promise((resolve, reject) => {
-      this.client.GetTicket({ id: ticketId }, (error, response) => {
+      this.client.GetTicket({ ticket_id: ticketId }, (error, response) => {
+        // ← SỬA: đổi id thành ticket_id
         if (error) {
           console.error(
             'ChatbotService TicketClient: Error getting ticket:',
@@ -56,7 +57,8 @@ class TicketClient {
 
   async getAllTickets () {
     return new Promise((resolve, reject) => {
-      this.client.GetAllTickets({}, (error, response) => {
+      this.client.ListAllTickets({}, (error, response) => {
+        // ← SỬA: đổi từ GetAllTickets thành ListAllTickets
         if (error) {
           console.error(
             'ChatbotService TicketClient: Error getting all tickets:',
@@ -72,7 +74,8 @@ class TicketClient {
 
   async getTicketsByEventId (eventId) {
     return new Promise((resolve, reject) => {
-      this.client.GetTicketsByEvent(
+      this.client.ListTicketsByEvent(
+        // ← SỬA: đổi từ GetTicketsByEvent thành ListTicketsByEvent
         { event_id: eventId },
         (error, response) => {
           if (error) {
@@ -91,17 +94,21 @@ class TicketClient {
 
   async getTicketsByUserId (userId) {
     return new Promise((resolve, reject) => {
-      this.client.GetTicketsByUser({ user_id: userId }, (error, response) => {
-        if (error) {
-          console.error(
-            'ChatbotService TicketClient: Error getting tickets by user:',
-            error
-          )
-          resolve([])
-        } else {
-          resolve(response.tickets || [])
+      this.client.ListTicketsByOwner(
+        { owner_address: userId },
+        (error, response) => {
+          // ← SỬA: đổi method và field
+          if (error) {
+            console.error(
+              'ChatbotService TicketClient: Error getting tickets by user:',
+              error
+            )
+            resolve([])
+          } else {
+            resolve(response.tickets || [])
+          }
         }
-      })
+      )
     })
   }
 }
