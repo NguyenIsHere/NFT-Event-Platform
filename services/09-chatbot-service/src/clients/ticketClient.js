@@ -57,18 +57,40 @@ class TicketClient {
 
   async getAllTickets () {
     return new Promise((resolve, reject) => {
-      this.client.ListAllTickets({}, (error, response) => {
-        // ← SỬA: đổi từ GetAllTickets thành ListAllTickets
-        if (error) {
-          console.error(
-            'ChatbotService TicketClient: Error getting all tickets:',
-            error
-          )
-          reject(error)
-        } else {
-          resolve(response.tickets || [])
+      console.log(
+        'ChatbotService TicketClient: Attempting to call ListAllTickets...'
+      )
+
+      // ✅ FIX: Truyền page_size thay vì empty object
+      this.client.ListAllTickets(
+        {
+          page_size: 100, // Get more tickets for indexing
+          status_filter: '' // No filter - get all statuses
+        },
+        (error, response) => {
+          if (error) {
+            console.error(
+              'ChatbotService TicketClient: Error getting all tickets:',
+              error
+            )
+            console.error('Error details:', {
+              code: error.code,
+              details: error.details,
+              message: error.message
+            })
+            resolve([]) // Return empty array instead of reject
+          } else {
+            console.log(
+              'ChatbotService TicketClient: ListAllTickets response:',
+              {
+                ticketsCount: response.tickets?.length || 0,
+                hasNextPageToken: !!response.next_page_token
+              }
+            )
+            resolve(response.tickets || [])
+          }
         }
-      })
+      )
     })
   }
 

@@ -928,16 +928,22 @@ async function ListAllTickets (call, callback) {
       query.status = status_filter
     }
 
-    const limit = Math.min(page_size, 100)
+    // ✅ FIX: Handle page_size = 0 case
+    const requestedPageSize = page_size || 20 // Default to 20 if 0 or undefined
+    const limit = Math.min(requestedPageSize, 100)
     let skip = 0
 
     if (page_token) {
       try {
-        skip = parseInt(page_token)
+        skip = parseInt(page_token) || 0
       } catch (e) {
         skip = 0
       }
     }
+
+    console.log(
+      `TicketService: Querying tickets with limit: ${limit}, skip: ${skip}`
+    )
 
     const tickets = await Ticket.find(query)
       .sort({ createdAt: -1 })
@@ -947,6 +953,10 @@ async function ListAllTickets (call, callback) {
     const hasMore = tickets.length > limit
     const ticketsToReturn = hasMore ? tickets.slice(0, limit) : tickets
     const nextPageToken = hasMore ? (skip + limit).toString() : ''
+
+    console.log(
+      `TicketService: Returning ${ticketsToReturn.length} tickets, hasMore: ${hasMore}`
+    )
 
     callback(null, {
       tickets: ticketsToReturn.map(ticketDocumentToGrpcTicket),

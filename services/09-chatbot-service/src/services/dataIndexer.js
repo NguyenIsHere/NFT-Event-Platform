@@ -143,28 +143,35 @@ async function indexTickets (forceReindex = false) {
 
     console.log(`Processing ${tickets.length} tickets...`)
 
-    // Prepare texts for embedding
-    const ticketTexts = tickets.map(
-      ticket =>
-        `vé ${ticket.type} sự kiện ${ticket.event_id} giá ${ticket.price} trạng thái ${ticket.status}`
-    )
+    // ✅ FIX: Map đúng fields từ ticket.proto
+    const ticketTexts = tickets.map(ticket => {
+      // Ticket fields từ proto: id, event_id, ticket_type_id, status, owner_address, etc.
+      const eventId = ticket.event_id || 'unknown'
+      const status = ticket.status || 'unknown'
+      const ticketTypeId = ticket.ticket_type_id || 'standard'
+      const ownerAddress = ticket.owner_address || 'unknown'
+
+      return `vé ${ticketTypeId} sự kiện ${eventId} trạng thái ${status} chủ sở hữu ${ownerAddress}`
+    })
 
     // Generate embeddings
     const embeddings = await generateBatchEmbeddings(ticketTexts)
 
-    // Prepare vectors for Pinecone
+    // ✅ FIX: Map đúng metadata fields
     const vectors = tickets.map((ticket, index) => ({
       id: `ticket_${ticket.id}`,
       values: embeddings[index],
       metadata: {
         id: ticket.id,
         type: 'ticket',
-        title: `Vé ${ticket.type}`,
-        content: `Vé loại ${ticket.type} cho sự kiện ${ticket.event_id}. Giá: ${ticket.price}. Trạng thái: ${ticket.status}`,
+        title: `Vé cho sự kiện ${ticket.event_id}`,
+        content: `Vé ID ${ticket.id} cho sự kiện ${ticket.event_id}. Trạng thái: ${ticket.status}. Chủ sở hữu: ${ticket.owner_address}`,
         event_id: ticket.event_id,
-        ticket_type: ticket.type,
-        price: ticket.price,
-        status: ticket.status
+        ticket_type_id: ticket.ticket_type_id,
+        status: ticket.status,
+        owner_address: ticket.owner_address,
+        token_id: ticket.token_id || '',
+        check_in_status: ticket.check_in_status || 'NOT_CHECKED_IN'
       }
     }))
 
