@@ -2,6 +2,7 @@ const grpc = require('@grpc/grpc-js')
 const { generateResponse } = require('../services/geminiService')
 const { searchSimilarContent } = require('../services/ragService')
 const { saveChatMessage } = require('../models/ChatHistory')
+const { detectIntent } = require('../services/intentDetectionService')
 const { v4: uuidv4 } = require('uuid')
 
 async function Chat (call, callback) {
@@ -10,16 +11,37 @@ async function Chat (call, callback) {
   console.log(`ChatbotService: Chat request from user ${user_id}: ${message}`)
 
   try {
-    // 1. Search for relevant context using RAG
-    const contextData = await searchSimilarContent(message, context_filters, 5)
+    // 1. Auto-detect intent if no context_filters provided
+    let finalContextFilters = context_filters
 
-    // 2. Build context prompt
-    const contextPrompt = buildContextPrompt(contextData)
+    if (!context_filters || context_filters.length === 0) {
+      console.log('No context filters provided, auto-detecting intent...')
+      const intentResult = await detectIntent(message)
+      finalContextFilters = intentResult.filters
 
-    // 3. Generate response using Gemini
+      console.log(
+        `Auto-detected filters: [${finalContextFilters.join(
+          ', '
+        )}] with confidence: ${intentResult.confidence.toFixed(2)}`
+      )
+    } else {
+      console.log(`Using provided filters: [${context_filters.join(', ')}]`)
+    }
+
+    // 2. Search for relevant context using RAG with detected filters
+    const contextData = await searchSimilarContent(
+      message,
+      finalContextFilters,
+      5
+    )
+
+    // 3. Build enhanced context prompt
+    const contextPrompt = buildContextPrompt(contextData, finalContextFilters)
+
+    // 4. Generate response using Gemini
     const response = await generateResponse(message, contextPrompt)
 
-    // 4. Save chat history
+    // 5. Save chat history
     const chatId = uuidv4()
     const actualSessionId = session_id || chatId
 
@@ -29,10 +51,11 @@ async function Chat (call, callback) {
       sessionId: actualSessionId,
       message,
       response: response.text,
-      sources: contextData
+      sources: contextData,
+      detectedFilters: finalContextFilters // Save detected filters for analytics
     })
 
-    // 5. Return response
+    // 6. Return response with detected filters info
     callback(null, {
       response: response.text,
       session_id: actualSessionId,
@@ -42,7 +65,8 @@ async function Chat (call, callback) {
         title: item.title,
         relevance_score: item.score
       })),
-      confidence_score: response.confidence || 0.8
+      confidence_score: response.confidence || 0.8,
+      detected_filters: finalContextFilters // ✅ Trả về filters đã detect
     })
   } catch (error) {
     console.error('ChatbotService: Chat error:', error)
@@ -51,6 +75,34 @@ async function Chat (call, callback) {
       message: error.message || 'Failed to process chat request'
     })
   }
+}
+
+function buildContextPrompt (contextData, detectedFilters) {
+  if (!contextData || contextData.length === 0) {
+    const filterText =
+      detectedFilters.length > 0 ? ` về ${detectedFilters.join(', ')}` : ''
+    return `Không có thông tin liên quan${filterText} trong cơ sở dữ liệu.`
+  }
+
+  let prompt = `Dựa trên thông tin sau từ hệ thống NFT Event Platform`
+
+  if (detectedFilters.length > 0) {
+    prompt += ` (tìm kiếm trong: ${detectedFilters.join(', ')})`
+  }
+
+  prompt += ':\n\n'
+
+  contextData.forEach((item, index) => {
+    prompt += `${index + 1}. ${item.type.toUpperCase()}: ${item.title}\n`
+    prompt += `   ${item.content}\n\n`
+  })
+
+  prompt +=
+    'Hãy trả lời câu hỏi dựa trên thông tin trên một cách chính xác và hữu ích. '
+  prompt +=
+    'Nếu thông tin không đầy đủ để trả lời, hãy nói rõ điều đó và đưa ra gợi ý.'
+
+  return prompt
 }
 
 function buildContextPrompt (contextData) {
