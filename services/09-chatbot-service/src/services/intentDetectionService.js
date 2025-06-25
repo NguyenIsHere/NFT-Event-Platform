@@ -52,7 +52,18 @@ const INTENT_PATTERNS = {
     'thanh toán',
     'payment',
     'mua vé',
-    'đặt vé'
+    'đặt vé',
+    // ✅ THÊM: Check-in related keywords
+    'check-in',
+    'check in',
+    'checkin',
+    'đã check',
+    'đã vào',
+    'đã tham dự',
+    'đã tham gia',
+    'attendance',
+    'tham dự',
+    'vào sự kiện'
   ],
 
   user: [
@@ -69,6 +80,18 @@ const INTENT_PATTERNS = {
     'hồ sơ'
   ]
 }
+
+// ✅ THÊM: Status/state patterns
+const STATUS_PATTERNS = [
+  'trạng thái',
+  'status',
+  'đã',
+  'already',
+  'completed',
+  'finished',
+  'pending',
+  'processing'
+]
 
 // Location patterns
 const LOCATION_PATTERNS = [
@@ -117,7 +140,8 @@ async function detectIntent (message) {
     isLocationQuery: false,
     isTimeQuery: false,
     isCountQuery: false,
-    isAvailabilityQuery: false
+    isAvailabilityQuery: false,
+    isStatusQuery: false // ✅ THÊM: Status query detection
   }
 
   // 1. Detect content types based on keywords
@@ -152,6 +176,11 @@ async function detectIntent (message) {
     'có thể',
     'can'
   ].some(pattern => lowerMessage.includes(pattern.toLowerCase()))
+
+  // ✅ THÊM: Status query detection
+  detectedIntents.isStatusQuery = STATUS_PATTERNS.some(pattern =>
+    lowerMessage.includes(pattern.toLowerCase())
+  )
 
   // 3. Smart defaults based on context
   if (detectedFilters.length === 0) {

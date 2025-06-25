@@ -20,7 +20,7 @@ message ChatRequest {
   string message = 1;
   string user_id = 2;
   string session_id = 3;
-  repeated string context_filters = 4;
+  repeated string context_filters = 4; // Optional - will auto-detect if empty
 }
 
 message ChatResponse {
@@ -28,6 +28,7 @@ message ChatResponse {
   string session_id = 2;
   repeated ContextSource sources = 3;
   double confidence_score = 4;
+  repeated string detected_filters = 5; // ✅ THÊM: Return detected filters
 }
 
 message ContextSource {
@@ -38,7 +39,7 @@ message ContextSource {
 }
 
 message IndexDataRequest {
-  string data_type = 1;
+  string data_type = 1; // "events", "tickets", "users" or empty for all
   bool force_reindex = 2;
 }
 
@@ -65,4 +66,5 @@ message ChatMessage {
   string message = 4;
   string response = 5;
   int64 timestamp = 6;
+  repeated string detected_filters = 7; // ✅ THÊM: Include in history
 }
