@@ -4,35 +4,75 @@ const ticketClient = require('../clients/ticketClient')
 const { generateBatchEmbeddings } = require('./embeddingService')
 const { upsertVectors } = require('../utils/vectorUtils')
 const { v4: uuidv4 } = require('uuid')
+const indexingManager = require('./indexingManager')
 
 async function indexExistingData (dataType = null, forceReindex = false) {
-  console.log('Starting data indexing process...')
+  console.log('🔍 Checking if indexing is needed...')
 
   let totalIndexed = 0
 
   try {
-    if (!dataType || dataType === 'events') {
-      const eventCount = await indexEvents(forceReindex)
-      totalIndexed += eventCount
-      console.log(`Indexed ${eventCount} events`)
+    // ✅ SMART CHECK: Only index what's needed
+    if (!forceReindex) {
+      const reindexNeeds = await indexingManager.shouldReindex(dataType)
+
+      if (reindexNeeds.reason.length > 0) {
+        console.log('📊 Reindex reasons:', reindexNeeds.reason)
+      } else {
+        console.log('✅ No indexing needed - data is up to date')
+        return { count: 0, skipped: true }
+      }
+
+      // Index only what needs updating
+      if (!dataType || dataType === 'events') {
+        if (reindexNeeds.events) {
+          const eventCount = await indexEvents(forceReindex)
+          totalIndexed += eventCount
+          await indexingManager.updateIndexedCounts('events', eventCount)
+          console.log(`📚 Indexed ${eventCount} events`)
+        } else {
+          console.log('⏭️  Skipping events - no changes detected')
+        }
+      }
+
+      if (!dataType || dataType === 'tickets') {
+        if (reindexNeeds.tickets) {
+          const ticketCount = await indexTickets(forceReindex)
+          totalIndexed += ticketCount
+          await indexingManager.updateIndexedCounts('tickets', ticketCount)
+          console.log(`🎫 Indexed ${ticketCount} tickets`)
+        } else {
+          console.log('⏭️  Skipping tickets - no changes detected')
+        }
+      }
+    } else {
+      // Force reindex all
+      console.log('🔄 Force reindexing all data...')
+
+      if (!dataType || dataType === 'events') {
+        const eventCount = await indexEvents(forceReindex)
+        totalIndexed += eventCount
+        await indexingManager.updateIndexedCounts('events', eventCount)
+        console.log(`📚 Force indexed ${eventCount} events`)
+      }
+
+      if (!dataType || dataType === 'tickets') {
+        const ticketCount = await indexTickets(forceReindex)
+        totalIndexed += ticketCount
+        await indexingManager.updateIndexedCounts('tickets', ticketCount)
+        console.log(`🎫 Force indexed ${ticketCount} tickets`)
+      }
     }
 
+    // Skip users (privacy)
     if (!dataType || dataType === 'users') {
-      const userCount = await indexUsers(forceReindex)
-      totalIndexed += userCount
-      console.log(`Indexed ${userCount} users`)
+      console.log('⏭️  Skipping users - privacy policy')
     }
 
-    if (!dataType || dataType === 'tickets') {
-      const ticketCount = await indexTickets(forceReindex)
-      totalIndexed += ticketCount
-      console.log(`Indexed ${ticketCount} tickets`)
-    }
-
-    console.log(`Data indexing completed. Total indexed: ${totalIndexed}`)
-    return { count: totalIndexed }
+    console.log(`✅ Indexing completed. Total indexed: ${totalIndexed}`)
+    return { count: totalIndexed, skipped: false }
   } catch (error) {
-    console.error('Error during data indexing:', error)
+    console.error('❌ Error during intelligent indexing:', error)
     throw error
   }
 }
@@ -185,19 +225,23 @@ async function indexTickets (forceReindex = false) {
   }
 }
 
-// Scheduled indexing (chạy định kỳ để update data)
 async function schedulePeriodicIndexing () {
-  console.log('Setting up periodic data indexing...')
+  console.log('⏰ Setting up intelligent periodic indexing...')
 
-  // Index lại data mỗi 6 tiếng
+  // Check every 2 hours instead of reindexing every 6 hours
   setInterval(async () => {
-    console.log('Running scheduled data indexing...')
+    console.log('🔍 Running periodic indexing check...')
     try {
-      await indexExistingData()
+      const result = await indexExistingData()
+      if (result.skipped) {
+        console.log('✅ Periodic check: No indexing needed')
+      } else {
+        console.log(`✅ Periodic indexing: ${result.count} items processed`)
+      }
     } catch (error) {
-      console.error('Scheduled indexing failed:', error)
+      console.error('❌ Periodic indexing failed:', error)
     }
-  }, 6 * 60 * 60 * 1000) // 6 hours
+  }, 2 * 60 * 60 * 1000) // Check every 2 hours
 }
 
 module.exports = {
