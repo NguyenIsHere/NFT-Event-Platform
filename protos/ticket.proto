@@ -8,7 +8,7 @@ import "google/api/annotations.proto";
 service TicketTypeService {
   rpc CreateTicketType(CreateTicketTypeRequest) returns (TicketType) {
     option (google.api.http) = {
-      post: "/v1/ticket-types/create"  // THAY ĐỔI PATH
+      post: "/v1/ticket-types/create"
       body: "*"
     };
   }
@@ -25,16 +25,30 @@ service TicketTypeService {
       get: "/v1/ticket-types/{ticket_type_id}"
     };
   }
+
+  rpc GetTicketTypeWithAvailability(GetTicketTypeWithAvailabilityRequest) returns (TicketType) {
+    option (google.api.http) = {
+      get: "/v1/ticket-types/{ticket_type_id}/availability"
+    };
+  }
+
+  // ✅ NEW: Publish ticket type to blockchain
+  rpc PublishTicketType(PublishTicketTypeRequest) returns (PublishTicketTypeResponse) {
+    option (google.api.http) = {
+      post: "/v1/ticket-types/{ticket_type_id}/publish"
+      body: "*"
+    };
+  }
   
   rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse) {
     option (google.api.http) = {
-      get: "/v1/ticket-types/by-event/{event_id}"  // THAY ĐỔI PATH
+      get: "/v1/ticket-types/by-event/{event_id}"
     };
   }
   
   rpc ListTicketTypesBySession(ListTicketTypesBySessionRequest) returns (ListTicketTypesResponse) {
     option (google.api.http) = {
-      get: "/v1/ticket-types/by-session/{event_id}/{session_id}"  // THAY ĐỔI PATH
+      get: "/v1/ticket-types/by-session/{event_id}/{session_id}"
     };
   }
 }
@@ -55,7 +69,7 @@ service TicketService {
     };
   }
 
-    rpc ListAllTickets(ListAllTicketsRequest) returns (ListTicketsResponse) {
+  rpc ListAllTickets(ListAllTicketsRequest) returns (ListTicketsResponse) {
     option (google.api.http) = {
       get: "/v1/tickets/all"
     };
@@ -69,27 +83,27 @@ service TicketService {
   
   rpc ListTicketsByEvent(ListTicketsByEventRequest) returns (ListTicketsResponse) {
     option (google.api.http) = {
-      get: "/v1/tickets/by-event/{event_id}"  // THAY ĐỔI PATH
+      get: "/v1/tickets/by-event/{event_id}"
     };
   }
   
   rpc ListTicketsByOwner(ListTicketsByOwnerRequest) returns (ListTicketsResponse) {
     option (google.api.http) = {
-      get: "/v1/tickets/by-owner/{owner_address}"  // THAY ĐỔI PATH
+      get: "/v1/tickets/by-owner/{owner_address}"
     };
   }
 
   rpc GenerateQRCode (GenerateQRCodeRequest) returns (GenerateQRCodeResponse) {
-        option (google.api.http) = {
-            post: "/v1/tickets/{ticket_id}/qr-code"
-        };
-    }
+    option (google.api.http) = {
+      post: "/v1/tickets/{ticket_id}/qr-code"
+    };
+  }
     
   rpc CheckIn (CheckInRequest) returns (CheckInResponse) {
-      option (google.api.http) = {
-          post: "/v1/tickets/check-in"
-          body: "*"
-      };
+    option (google.api.http) = {
+      post: "/v1/tickets/check-in"
+      body: "*"
+    };
   }
 
   rpc GetEventDashboard(EventDashboardRequest) returns (EventDashboardResponse) {
@@ -107,6 +121,18 @@ service TicketService {
   rpc GetCheckinAnalytics(CheckinAnalyticsRequest) returns (CheckinAnalyticsResponse) {
     option (google.api.http) = {
       get: "/v1/events/{event_id}/analytics/checkin"
+    };
+  }
+
+  rpc GetSoldSeatsByEvent(GetSoldSeatsByEventRequest) returns (GetSoldSeatsByEventResponse) {
+    option (google.api.http) = {
+      get: "/v1/tickets/sold-seats/event/{event_id}"
+    };
+  }
+
+  rpc GetTicketMetadata(GetTicketMetadataRequest) returns (GetTicketMetadataResponse) {
+    option (google.api.http) = {
+      get: "/v1/tickets/metadata/{ticket_id}"
     };
   }
 }
@@ -133,7 +159,262 @@ service SettlementService {
   }
 }
 
-// Settlement Messages
+// _____ Models _____
+message Ticket {
+  string id = 1;
+  string event_id = 2;
+  string ticket_type_id = 3;
+  string token_id = 4;
+  string owner_address = 5;
+  string session_id = 6;
+  string status = 7;
+  string token_uri_cid = 8;
+  string transaction_hash = 9;
+  int64 created_at = 10;
+  string qr_code_data = 11;
+  string check_in_status = 12;
+  int64 check_in_time = 13;
+  string check_in_location = 14;
+  int64 expiry_time = 15;
+  // ✅ THÊM: Seat information
+  SeatInfo seat_info = 16;
+}
+
+// ✅ THÊM: Seat information message
+message SeatInfo {
+  string seat_key = 1;      // e.g., "section1-0-5"
+  string section = 2;       // e.g., "section1"
+  string row = 3;           // e.g., "0" (displayed as "A")
+  string seat = 4;          // e.g., "5" (displayed as "6")
+}
+
+message TicketType {
+  string id = 1;
+  string event_id = 2;
+  string session_id = 3;
+  string contract_session_id = 4;
+  string blockchain_event_id = 5;
+  string blockchain_ticket_type_id = 6; // ✅ NEW: Blockchain ticket type ID
+  string name = 7;
+  int32 total_quantity = 8;
+  int32 available_quantity = 9;
+  string price_wei = 10;
+  int64 created_at = 11;
+  int64 updated_at = 12;
+}
+
+// _____ Request/Response Messages _____
+message CreateTicketTypeRequest { 
+  string event_id = 1; 
+  string session_id = 2; 
+  string name = 3; 
+  int32 total_quantity = 4; 
+  string price_wei = 5;
+}
+
+message UpdateTicketTypeRequest { 
+  string ticket_type_id = 1; 
+  string blockchain_event_id = 2;
+  string blockchain_ticket_type_id = 3; // ✅ NEW: Optional blockchain ticket type ID
+}
+
+message GetTicketTypeRequest { 
+  string ticket_type_id = 1; 
+}
+
+message GetTicketTypeWithAvailabilityRequest {
+  string ticket_type_id = 1;
+}
+
+// ✅ NEW: Publish ticket type messages
+message PublishTicketTypeRequest {
+  string ticket_type_id = 1;
+}
+
+message PublishTicketTypeResponse {
+  bool success = 1;
+  string message = 2;
+  TicketType ticket_type = 3;
+  string blockchain_ticket_type_id = 4;
+  string transaction_hash = 5;
+}
+
+message ListTicketTypesByEventRequest { 
+  string event_id = 1; 
+}
+
+message ListTicketTypesBySessionRequest { 
+  string event_id = 1; 
+  string session_id = 2; 
+}
+
+message ListTicketTypesResponse { 
+  repeated TicketType ticket_types = 1; 
+}
+
+// ✅ CẬP NHẬT: InitiatePurchaseRequest để hỗ trợ seat selection
+message InitiatePurchaseRequest {
+  string ticket_type_id = 1;
+  string buyer_address = 2;
+  int32 quantity = 3;                    // ✅ THÊM: Quantity cho non-seat events
+  repeated string selected_seats = 4;    // ✅ THÊM: Selected seat keys cho seat events
+}
+
+message InitiatePurchaseResponse {
+  string ticket_order_id = 1;
+  string payment_contract_address = 2;
+  string price_to_pay_wei = 3;
+  string blockchain_event_id = 4;
+  string blockchain_ticket_type_id = 5; // ✅ ADD
+  string session_id_for_contract = 6;
+  string token_uri_cid = 7; 
+  string purchase_id = 8;
+}
+
+message ConfirmPaymentAndRequestMintRequest {
+  string ticket_order_id = 1;
+  string payment_transaction_hash = 2;
+}
+
+message ConfirmPaymentAndRequestMintResponse {
+  Ticket ticket = 1;
+  repeated Ticket tickets = 2;  // ✅ THÊM: Để hỗ trợ multiple tickets
+}
+
+message GetTicketRequest { 
+  string ticket_id = 1; 
+}
+
+message ListTicketsByEventRequest { 
+  string event_id = 1; 
+  int32 page_size = 2; 
+  string page_token = 3; 
+}
+
+message ListTicketsByOwnerRequest { 
+  string owner_address = 1; 
+  int32 page_size = 2; 
+  string page_token = 3; 
+}
+
+message ListTicketsResponse { 
+  repeated Ticket tickets = 1; 
+  string next_page_token = 2; 
+}
+
+// Thêm messages cho check-in
+message CheckInRequest {
+  string qr_code_data = 1;
+  string location = 2;
+  string scanner_id = 3;
+}
+
+message CheckInResponse {
+  bool success = 1;
+  string message = 2;
+  Ticket ticket = 3;
+}
+
+message GenerateQRCodeRequest {
+  string ticket_id = 1;
+}
+
+message GenerateQRCodeResponse {
+  bool success = 1;
+  string message = 2;
+  string qr_code_data = 3;
+  string qr_code_image_base64 = 4;
+}
+
+message ListAllTicketsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  string status_filter = 3;
+}
+
+// ✅ Analytics messages (unchanged)
+message EventDashboardRequest {
+  string event_id = 1;
+  DateRange date_range = 2;
+}
+
+message DateRange {
+  int64 start_date = 1;
+  int64 end_date = 2;
+}
+
+message EventDashboardResponse {
+  string event_id = 1;
+  DateRange date_range = 2;
+  TicketSummary ticket_summary = 3;
+  RevenueSummary revenue_summary = 4;
+  CheckinSummary checkin_summary = 5;
+  repeated DailySale daily_trends = 6;
+}
+
+message TicketSummary {
+  int32 total_tickets = 1;
+  repeated StatusCount by_status = 2;
+}
+
+message StatusCount {
+  string status = 1;
+  int32 count = 2;
+}
+
+message RevenueSummary {
+  string total_revenue_wei = 1;
+  string platform_fees_wei = 2;
+  string organizer_revenue_wei = 3;
+  int32 transaction_count = 4;
+}
+
+message CheckinSummary {
+  int32 total_minted = 1;
+  repeated StatusCount by_status = 2;
+}
+
+message DailySale {
+  string date = 1;
+  int32 tickets_sold = 2;
+}
+
+message OrganizerStatsRequest {
+  string organizer_id = 1;
+}
+
+message OrganizerStatsResponse {
+  string organizer_id = 1;
+  int32 total_events = 2;
+  int32 total_tickets_sold = 3;
+  string total_revenue_wei = 4;
+  int32 active_events = 5;
+}
+
+message CheckinAnalyticsRequest {
+  string event_id = 1;
+  string time_period = 2;
+}
+
+message CheckinAnalyticsResponse {
+  string event_id = 1;
+  string time_period = 2;
+  repeated HourlyCheckin hourly_checkins = 3;
+  repeated LocationCount location_breakdown = 4;
+  CheckinSummary summary = 5;
+}
+
+message HourlyCheckin {
+  int32 hour = 1;
+  int32 count = 2;
+}
+
+message LocationCount {
+  string location = 1;
+  int32 count = 2;
+}
+
+// Settlement Messages (unchanged)
 message GetEventSettlementSummaryRequest {
   string event_id = 1;
 }
@@ -194,224 +475,24 @@ message ListPlatformTransactionsResponse {
   string next_page_token = 2;
 }
 
-// _____ Models _____
-message Ticket {
-  string id = 1;
-  string event_id = 2;
-  string ticket_type_id = 3;
-  string token_id = 4;        // uint256, dạng string (ID của NFT)
-  string owner_address = 5;   // Địa chỉ ví của người mua
-  string session_id = 6;      // ID của session liên quan
-  string status = 7;          // Ví dụ: PENDING_PAYMENT, PAID, MINTING, MINTED, FAILED_MINT
-  string token_uri_cid = 8;   // CID của metadata JSON (chỉ hash, không có ipfs://)
-  string transaction_hash = 9; // Hash của giao dịch mint
-  int64 created_at = 10;
-
-  string qr_code_data = 11;
-  string check_in_status = 12;
-  int64 check_in_time = 13;
-  string check_in_location = 14;
-  int64 expiry_time = 15;
+message GetSoldSeatsByEventRequest {
+  string event_id = 1;
 }
 
-message TicketType {
-  string id = 1;
-  string event_id = 2;
-  string session_id = 3; // mongoDB ObjectId
- string contract_session_id = 4; // << THÊM: ID dạng số (string) của Session dùng cho contract
-  string blockchain_event_id = 5; // ID của Event cha trên Blockchain (uint256, string)
-  string name = 6;
-  int32 total_quantity = 7;
-  int32 available_quantity = 8;
-  string price_wei = 9;
-  int64 created_at = 10;
-  int64 updated_at = 11;
+message SoldSeat {
+  string seat_key = 1;
+  string status = 2;
 }
 
-// _____ Request/Response Messages _____
-message CreateTicketTypeRequest { 
-  string event_id = 1; 
-  string session_id = 2; 
-  // string contract_session_id = 3; // << THÊM: ID dạng số (string) của Session dùng cho contract
-  string name = 3; 
-  int32 total_quantity = 4; 
-  string price_wei = 5;
+message GetSoldSeatsByEventResponse {
+  string event_id = 1;
+  repeated SoldSeat sold_seats = 2;
 }
 
-message UpdateTicketTypeRequest { 
-  string ticket_type_id = 1; 
-  string blockchain_event_id = 2;
-}
-
-message GetTicketTypeRequest { 
-  string ticket_type_id = 1; 
-}
-
-message ListTicketTypesByEventRequest { 
-  string event_id = 1; 
-}
-
-message ListTicketTypesBySessionRequest { 
-  string event_id = 1; 
-  string session_id = 2; 
-}
-
-message ListTicketTypesResponse { 
-  repeated TicketType ticket_types = 1; 
-}
-
-message InitiatePurchaseRequest {
-  string ticket_type_id = 1;
-  string buyer_address = 2; // Địa chỉ ví của người sẽ nhận NFT
-}
-
-message InitiatePurchaseResponse {
-  string ticket_order_id = 1;        // ID của đơn hàng vé
-  string payment_contract_address = 2; // Địa chỉ contract EventTicketNFT
-  string price_to_pay_wei = 3;         // Số tiền cần thanh toán
-  string blockchain_event_id = 4;      // ID sự kiện trên blockchain
-  string session_id_for_contract = 5;  // Session ID cho contract
-  string token_uri_cid = 6; 
-}
-
-message ConfirmPaymentAndRequestMintRequest {
-  string ticket_order_id = 1;  // ID của đơn hàng vé từ InitiatePurchaseResponse
-  string payment_transaction_hash = 2; // Hash của giao dịch thanh toán
-}
-
-message ConfirmPaymentAndRequestMintResponse {
-  Ticket ticket = 1; // Trả về thông tin vé đã được cập nhật
-}
-
-message GetTicketRequest { 
-  string ticket_id = 1; 
-}
-
-message ListTicketsByEventRequest { 
-  string event_id = 1; 
-  int32 page_size = 2; 
-  string page_token = 3; 
-}
-
-message ListTicketsByOwnerRequest { 
-  string owner_address = 1; 
-  int32 page_size = 2; 
-  string page_token = 3; 
-}
-
-message ListTicketsResponse { 
-  repeated Ticket tickets = 1; 
-  string next_page_token = 2; 
-}
-
-// Thêm messages cho check-in
-message CheckInRequest {
-  string qr_code_data = 1;
-  string location = 2;
-  string scanner_id = 3; // ID của người/thiết bị scan
-}
-
-message CheckInResponse {
-  bool success = 1;
-  string message = 2;
-  Ticket ticket = 3;
-}
-
-message GenerateQRCodeRequest {
+message GetTicketMetadataRequest {
   string ticket_id = 1;
 }
 
-message GenerateQRCodeResponse {
-  bool success = 1;
-  string message = 2;
-  string qr_code_data = 3;
-  string qr_code_image_base64 = 4;
-}
-
-message ListAllTicketsRequest {
-  int32 page_size = 1;
-  string page_token = 2;
-  string status_filter = 3;
-}
-
-// ✅ THÊM: Analytics messages
-message EventDashboardRequest {
-  string event_id = 1;
-  DateRange date_range = 2;
-}
-
-message DateRange {
-  int64 start_date = 1; // Unix timestamp
-  int64 end_date = 2;
-}
-
-message EventDashboardResponse {
-  string event_id = 1;
-  DateRange date_range = 2;
-  TicketSummary ticket_summary = 3;
-  RevenueSummary revenue_summary = 4;
-  CheckinSummary checkin_summary = 5;
-  repeated DailySale daily_trends = 6;
-}
-
-message TicketSummary {
-  int32 total_tickets = 1;
-  repeated StatusCount by_status = 2;
-}
-
-message StatusCount {
-  string status = 1;
-  int32 count = 2;
-}
-
-message RevenueSummary {
-  string total_revenue_wei = 1;
-  string platform_fees_wei = 2;
-  string organizer_revenue_wei = 3;
-  int32 transaction_count = 4;
-}
-
-message CheckinSummary {
-  int32 total_minted = 1;
-  repeated StatusCount by_status = 2;
-}
-
-message DailySale {
-  string date = 1; // YYYY-MM-DD format
-  int32 tickets_sold = 2;
-}
-
-message OrganizerStatsRequest {
-  string organizer_id = 1;
-}
-
-message OrganizerStatsResponse {
-  string organizer_id = 1;
-  int32 total_events = 2;
-  int32 total_tickets_sold = 3;
-  string total_revenue_wei = 4;
-  int32 active_events = 5;
-}
-
-message CheckinAnalyticsRequest {
-  string event_id = 1;
-  string time_period = 2; // "TODAY", "WEEK", "ALL"
-}
-
-message CheckinAnalyticsResponse {
-  string event_id = 1;
-  string time_period = 2;
-  repeated HourlyCheckin hourly_checkins = 3;
-  repeated LocationCount location_breakdown = 4;
-  CheckinSummary summary = 5;
-}
-
-message HourlyCheckin {
-  int32 hour = 1; // 0-23
-  int32 count = 2;
-}
-
-message LocationCount {
-  string location = 1;
-  int32 count = 2;
+message GetTicketMetadataResponse {
+  string metadata = 1;
 }

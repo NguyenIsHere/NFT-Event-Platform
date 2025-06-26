@@ -7,7 +7,7 @@ const mongoose = require('mongoose')
 // Helper function để chuyển đổi Mongoose document sang gRPC message SeatMap
 function seatMapDocumentToGrpcSeatMap (doc) {
   if (!doc) return null
-  const jsonDoc = doc.toJSON ? doc.toJSON() : doc // toJSON đã có virtual id
+  const jsonDoc = doc.toJSON ? doc.toJSON() : doc
 
   return {
     id: jsonDoc.id,
@@ -19,19 +19,19 @@ function seatMapDocumentToGrpcSeatMap (doc) {
     },
     sections: jsonDoc.sections
       ? jsonDoc.sections.map(s => ({
-          id: s.id, // Đã là virtual id string
+          id: s.id,
           name: s.name,
           type: s.type,
           position: s.position,
           dimensions: s.dimensions,
           rows: s.rows,
-          seats_per_row: s.seats_per_row, // Khớp tên trường proto
+          seats_per_row: s.seats_per_row,
           color: s.color || '',
           price_category_id: s.price_category_id || '',
-          price_description: s.price_description || ''
+          price_description: s.price_description || '',
+          rows_config_input: s.rows_config_input || '' // ✅ ADD
         }))
       : []
-    // created_at, updated_at nếu có trong proto SeatMap
   }
 }
 
@@ -40,40 +40,73 @@ async function CreateSeatMap (call, callback) {
   console.log(`SeatMapService: CreateSeatMap called for event_id: ${event_id}`)
 
   try {
-    // TODO (Quan trọng): Xác minh event_id có tồn tại không bằng cách gọi eventServiceClient.GetEvent({event_id})
-    // if (mongoose.Types.ObjectId.isValid(event_id)) {
-    //    const event = await eventServiceClient.GetEvent({event_id}); // Cần promise wrapper
-    //    if(!event || !event.event) return callback({code: grpc.status.NOT_FOUND, message: "Associated event not found."})
-    // } else {
-    //    return callback({code: grpc.status.INVALID_ARGUMENT, message: "Invalid event_id format."})
-    // }
+    // Validate event_id format if needed
+    if (!event_id || typeof event_id !== 'string') {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid event_id format.'
+      })
+    }
 
-    // Kiểm tra xem event_id này đã có seatmap chưa (vì bạn đặt unique: true cho eventId trong schema)
+    // ✅ FIX: Kiểm tra xem event_id này đã có seatmap chưa
     const existingSeatMap = await SeatMap.findOne({ eventId: event_id })
     if (existingSeatMap) {
       return callback({
         code: grpc.status.ALREADY_EXISTS,
-        message: `Seat map for event_id ${event_id} already exists. Use UpdateSeatMap to modify.`
+        message: `Seat map for event_id ${event_id} already exists. Use UpdateSeatMap (PUT /v1/seatmaps/${existingSeatMap.id}) to modify.`
       })
     }
 
-    // Chuyển đổi sections từ proto input sang Mongoose schema input nếu cần
+    // ✅ FIX: Validate input data
+    if (!stage_config || !stage_config.dimensions || !stage_config.position) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'stage_config with dimensions and position is required.'
+      })
+    }
+
+    if (!sections || sections.length === 0) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'At least one section is required.'
+      })
+    }
+
+    // ✅ FIX: Validate sections data
+    for (let i = 0; i < sections.length; i++) {
+      const section = sections[i]
+      if (
+        !section.name ||
+        !section.type ||
+        !section.position ||
+        !section.dimensions
+      ) {
+        return callback({
+          code: grpc.status.INVALID_ARGUMENT,
+          message: `Section ${
+            i + 1
+          }: name, type, position, and dimensions are required.`
+        })
+      }
+    }
+
+    // ✅ FIX: Transform sections với rows_config_input
     const mongooseSections = sections.map(s_in => ({
       name: s_in.name,
       type: s_in.type,
       position: s_in.position,
       dimensions: s_in.dimensions,
-      rows: s_in.rows,
-      seats_per_row: s_in.seats_per_row,
-      color: s_in.color,
-      price_category_id: s_in.price_category_id,
-      price_description: s_in.price_description
-      // Mongoose sẽ tự tạo _id cho mỗi section
+      rows: s_in.rows || 0,
+      seats_per_row: s_in.seats_per_row || 0,
+      color: s_in.color || '#87CEEB',
+      price_category_id: s_in.price_category_id || '',
+      price_description: s_in.price_description || '',
+      rows_config_input: s_in.rows_config_input || '' // ✅ ADD: Field mới
     }))
 
     const newSeatMap = new SeatMap({
       eventId: event_id,
-      stageConfig: stage_config, // Đổi tên cho khớp Mongoose schema
+      stageConfig: stage_config,
       sections: mongooseSections
     })
 
@@ -81,9 +114,9 @@ async function CreateSeatMap (call, callback) {
     console.log(
       `SeatMapService: SeatMap created for event ${event_id} with ID: ${savedSeatMap.id}`
     )
-    callback(null, { seat_map: seatMapDocumentToGrpcSeatMap(savedSeatMap) }) // Trả về SeatMapResponse
+    callback(null, { seat_map: seatMapDocumentToGrpcSeatMap(savedSeatMap) })
   } catch (error) {
-    console.error('SeatMapService: CreateSeatMap RPC error:', error)
+    console.error('SeatMapService: CreateSeatMap error:', error)
     if (error.name === 'ValidationError') {
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
@@ -93,7 +126,6 @@ async function CreateSeatMap (call, callback) {
       })
     }
     if (error.code === 11000) {
-      // Lỗi duplicate key (cho eventId nếu đã tồn tại)
       return callback({
         code: grpc.status.ALREADY_EXISTS,
         message: `Seat map for event_id ${event_id} already exists.`

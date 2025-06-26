@@ -195,28 +195,23 @@ async function CreateEvent (call, callback) {
 
     // ✅ PROCESS SESSIONS
     const mongooseSessions = sessions.map((s_in, index) => {
-      let contractSessionIdForDb = s_in.contract_session_id
-      if (!contractSessionIdForDb) {
-        contractSessionIdForDb = index.toString()
-        console.log(
-          `🔍 EventService: Assigning contract_session_id="${contractSessionIdForDb}" for session "${s_in.name}"`
-        )
-      }
+      // ✅ FIX: Tạo contract session ID duy nhất
+      const contractSessionId = `${Date.now()}${index
+        .toString()
+        .padStart(3, '0')}`
 
-      if (contractSessionIdForDb && !/^\d+$/.test(contractSessionIdForDb)) {
-        console.warn(
-          `⚠️ EventService: Invalid contract_session_id "${
-            s_in.contract_session_id
-          }" for session "${s_in.name}". Using index "${index.toString()}"`
-        )
-        contractSessionIdForDb = index.toString()
-      }
+      console.log(`🔍 Creating session ${index + 1}:`, {
+        name: s_in.name,
+        contractSessionId,
+        start_time: s_in.start_time,
+        end_time: s_in.end_time
+      })
 
       return {
-        name: s_in.name || `${name} - Session ${index + 1}`,
-        startTime: Number(s_in.start_time),
-        endTime: Number(s_in.end_time),
-        contractSessionId: contractSessionIdForDb
+        contractSessionId: contractSessionId, // ✅ FIX: Consistent field name
+        name: s_in.name?.trim() || `${name.trim()} - Phiên ${index + 1}`,
+        startTime: s_in.start_time,
+        endTime: s_in.end_time
       }
     })
 
@@ -282,18 +277,13 @@ async function CreateEvent (call, callback) {
 }
 
 async function PublishEvent (call, callback) {
-  const {
-    event_id,
-    desired_blockchain_event_id,
-    default_price_wei_on_chain,
-    total_supply_on_chain
-  } = call.request
+  const { event_id, desired_blockchain_event_id } = call.request
 
   console.log(
     `EventService: PublishEvent called for DB event_id: ${event_id} with desired blockchain_id: ${desired_blockchain_event_id}`
   )
 
-  let eventToPublish // Khai báo ở phạm vi rộng hơn để dùng trong finally hoặc catch nếu cần
+  let eventToPublish
   try {
     if (!mongoose.Types.ObjectId.isValid(event_id)) {
       return callback({
@@ -301,141 +291,83 @@ async function PublishEvent (call, callback) {
         message: 'Invalid event ID format.'
       })
     }
-    eventToPublish = await Event.findById(event_id) // Gán giá trị cho biến đã khai báo
+
+    // ✅ FIX: Validate desired_blockchain_event_id
+    if (
+      !desired_blockchain_event_id ||
+      desired_blockchain_event_id.trim() === ''
+    ) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'desired_blockchain_event_id is required and cannot be empty.'
+      })
+    }
+
+    eventToPublish = await Event.findById(event_id)
     if (!eventToPublish) {
       return callback({
         code: grpc.status.NOT_FOUND,
         message: 'Event draft not found to publish.'
       })
     }
+
     if (
       eventToPublish.status !== EVENT_STATUS_ENUM[0] &&
       eventToPublish.status !== EVENT_STATUS_ENUM[5]
     ) {
-      // DRAFT or FAILED_PUBLISH
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
         message: `Event cannot be published from status: ${eventToPublish.status}`
       })
     }
-    if (
-      eventToPublish.blockchainEventId &&
-      eventToPublish.status === EVENT_STATUS_ENUM[2]
-    ) {
-      // ACTIVE
-      return callback({
-        code: grpc.status.ALREADY_EXISTS,
-        message: 'Event is already published and active on blockchain.'
-      })
-    }
-
-    // Logic để xác định default_price_wei_on_chain và total_supply_on_chain
-    // có thể dựa vào thông tin từ request hoặc tổng hợp từ các TicketType.
-    // Hiện tại, chúng ta sử dụng giá trị từ request.
-    // Bạn có thể thêm logic gọi ticketTypeServiceClient.ListTicketTypesByEvent ở đây nếu cần.
 
     console.log(
-      `EventService: Attempting to register event ${eventToPublish.id} on blockchain...`
+      `EventService: Attempting to register event ${eventToPublish.id} on blockchain with ID: ${desired_blockchain_event_id}`
     )
+
     eventToPublish.status = EVENT_STATUS_ENUM[1] // PENDING_PUBLISH
     await eventToPublish.save()
 
+    // ✅ FIX: Call RegisterEventOnBlockchain with proper data
     const bcResponse = await new Promise((resolve, reject) => {
       blockchainServiceClient.RegisterEventOnBlockchain(
         {
-          system_event_id_for_ref: eventToPublish.id.toString(),
-          blockchain_event_id: desired_blockchain_event_id.toString(),
-          price_wei: default_price_wei_on_chain.toString(),
-          total_supply: total_supply_on_chain.toString()
+          system_event_id_for_ref: event_id,
+          blockchain_event_id: desired_blockchain_event_id,
+          event_name: eventToPublish.name
         },
-        { deadline: new Date(Date.now() + 60000) }, // Timeout dài hơn cho blockchain (60s)
-        (err, response) => {
-          if (err) return reject(err)
-          resolve(response)
+        { deadline: new Date(Date.now() + 30000) },
+        (err, res) => {
+          if (err) {
+            console.error('❌ Blockchain RegisterEvent error:', err)
+            reject(
+              new Error(err.details || err.message || 'Blockchain call failed')
+            )
+          } else {
+            console.log('✅ Blockchain RegisterEvent success:', res)
+            resolve(res)
+          }
         }
       )
     })
 
     if (bcResponse && bcResponse.success) {
-      eventToPublish.blockchainEventId = bcResponse.actual_blockchain_event_id
+      // ✅ FIX: Update event with blockchain data
+      eventToPublish.blockchainEventId =
+        bcResponse.actual_blockchain_event_id || desired_blockchain_event_id
       eventToPublish.status = EVENT_STATUS_ENUM[2] // ACTIVE
       eventToPublish.isActive = true
-      const publishedEvent = await eventToPublish.save()
+      await eventToPublish.save()
+
       console.log(
-        `EventService: Event ${publishedEvent.id} PUBLISHED. Blockchain ID: ${publishedEvent.blockchainEventId}, Tx: ${bcResponse.transaction_hash}`
+        `✅ EventService: Event ${eventToPublish.id} PUBLISHED. Blockchain ID: ${eventToPublish.blockchainEventId}, Tx: ${bcResponse.transaction_hash}`
       )
 
-      // === BƯỚC MỚI: CẬP NHẬT TicketTypes ===
-      console.log(
-        `EventService: Updating TicketTypes for event ${publishedEvent.id} with blockchain_event_id ${publishedEvent.blockchainEventId}`
-      )
-      try {
-        const listTicketTypesResponse = await new Promise((resolve, reject) => {
-          ticketTypeServiceClient.ListTicketTypesByEvent(
-            { event_id: publishedEvent.id.toString() },
-            { deadline: new Date(Date.now() + 5000) },
-            (err, response) => {
-              if (err) return reject(err)
-              resolve(response)
-            }
-          )
-        })
-
-        if (listTicketTypesResponse && listTicketTypesResponse.ticket_types) {
-          const updatePromises = listTicketTypesResponse.ticket_types.map(
-            tt => {
-              console.log(
-                `EventService: Calling UpdateTicketType for TicketType ID: ${tt.id} to set blockchain_event_id: ${publishedEvent.blockchainEventId}`
-              )
-              return new Promise((resolve, reject) => {
-                ticketTypeServiceClient.UpdateTicketType(
-                  {
-                    ticket_type_id: tt.id,
-                    blockchain_event_id: publishedEvent.blockchainEventId // Chỉ cập nhật trường này
-                  },
-                  { deadline: new Date(Date.now() + 5000) },
-                  (err, updatedTt) => {
-                    if (err) {
-                      console.error(
-                        `EventService: Failed to update TicketType ${tt.id}:`,
-                        err.details || err.message
-                      )
-                      return reject(err) // Hoặc chỉ log lỗi và tiếp tục
-                    }
-                    console.log(
-                      `EventService: TicketType ${updatedTt.id} updated with blockchain_event_id.`
-                    )
-                    resolve(updatedTt)
-                  }
-                )
-              })
-            }
-          )
-          await Promise.all(updatePromises) // Chờ tất cả các update hoàn thành
-          console.log(
-            `EventService: Finished updating ${listTicketTypesResponse.ticket_types.length} ticket types for event ${publishedEvent.id}.`
-          )
-        } else {
-          console.log(
-            `EventService: No ticket types found for event ${publishedEvent.id} to update.`
-          )
-        }
-      } catch (ticketServiceError) {
-        // Lỗi khi gọi TicketService, có thể log lại nhưng không nên làm PublishEvent thất bại hoàn toàn chỉ vì bước này
-        console.error(
-          `EventService: Error updating ticket types for event ${publishedEvent.id}:`,
-          ticketServiceError.details || ticketServiceError.message
-        )
-        // Event vẫn được coi là publish thành công lên chain. Việc cập nhật TicketType có thể retry sau.
-      }
-      // === KẾT THÚC BƯỚC MỚI ===
-
-      callback(null, { event: eventToGrpcEvent(publishedEvent) })
+      callback(null, { event: eventToGrpcEvent(eventToPublish) })
     } else {
       throw new Error(
-        `Failed to register event on blockchain: ${
-          bcResponse?.message || 'Blockchain service error'
-        }`
+        'Blockchain registration failed: ' +
+          (bcResponse?.message || 'Unknown error')
       )
     }
   } catch (error) {
@@ -443,25 +375,14 @@ async function PublishEvent (call, callback) {
       'EventService: PublishEvent RPC error:',
       error.details || error.message || error
     )
+
     if (eventToPublish) {
-      // Cố gắng cập nhật status về FAILED_PUBLISH nếu có thể
-      try {
-        eventToPublish.status = EVENT_STATUS_ENUM[5] // FAILED_PUBLISH
-        await eventToPublish.save()
-      } catch (updateError) {
-        console.error(
-          'EventService: Could not update event status to FAILED_PUBLISH:',
-          updateError
-        )
-      }
+      eventToPublish.status = EVENT_STATUS_ENUM[5] // FAILED_PUBLISH
+      await eventToPublish.save()
     }
 
-    let grpcErrorCode = grpc.status.INTERNAL
-    if (error.code && Object.values(grpc.status).includes(error.code)) {
-      grpcErrorCode = error.code
-    }
     callback({
-      code: grpcErrorCode,
+      code: grpc.status.INTERNAL,
       message: error.details || error.message || 'Failed to publish event.'
     })
   }

@@ -16,6 +16,7 @@ const ticketTypeSchema = new Schema(
       index: true // Có thể index nếu bạn query theo trường này
     },
     blockchainEventId: { type: String, required: false, trim: true },
+    blockchainTicketTypeId: { type: String, required: false, trim: true }, // ✅ NEW
     name: { type: String, required: true, trim: true },
     totalQuantity: { type: Number, required: true },
     availableQuantity: { type: Number, required: true },
@@ -49,6 +50,17 @@ const TICKET_STATUS_ENUM = [
   'MINTED', // 4
   'FAILED_MINT' // 5
 ]
+
+const seatInfoSchema = new Schema(
+  {
+    seatKey: { type: String, required: true }, // e.g., "section1-0-5"
+    section: { type: String, required: true }, // e.g., "section1"
+    row: { type: String, required: true }, // e.g., "0" (will be displayed as "A")
+    seat: { type: String, required: true } // e.g., "5" (will be displayed as "6")
+  },
+  { _id: false }
+)
+
 const ticketSchema = new Schema(
   {
     eventId: { type: String, required: true, index: true },
@@ -91,6 +103,11 @@ const ticketSchema = new Schema(
     expiryTime: {
       type: Date,
       required: false
+    },
+    // NEW: Seat information for events with seat maps
+    seatInfo: {
+      type: seatInfoSchema,
+      required: false
     }
   },
   {
@@ -110,6 +127,22 @@ ticketSchema.virtual('id').get(function () {
   return this._id.toHexString()
 })
 ticketSchema.index({ tokenId: 1 }, { unique: true, sparse: true })
+
+// Add compound index for seat uniqueness (prevent double booking)
+ticketSchema.index(
+  {
+    eventId: 1,
+    'seatInfo.seatKey': 1
+  },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: {
+      'seatInfo.seatKey': { $exists: true },
+      status: { $in: ['PENDING_PAYMENT', 'PAID', 'MINTING', 'MINTED'] }
+    }
+  }
+)
 
 const Ticket = mongoose.model('Ticket', ticketSchema)
 

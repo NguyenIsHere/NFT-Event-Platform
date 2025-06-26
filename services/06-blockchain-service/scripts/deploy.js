@@ -12,7 +12,11 @@ async function main () {
   )
 
   const EventTicketNFTFactory = await hre.ethers.getContractFactory(
-    'EventTicketNFT'
+    'EventTicketNFT',
+    {
+      gasLimit: 5000000, // 5M gas for deployment
+      gasPrice: ethers.parseUnits('20', 'gwei') // Reasonable gas price
+    }
   )
   const eventTicketNFT = await EventTicketNFTFactory.deploy()
 

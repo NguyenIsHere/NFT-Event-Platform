@@ -3,45 +3,41 @@ syntax = "proto3";
 package seatmap;
 
 import "google/api/annotations.proto";
-import "google/protobuf/empty.proto"; // Cho Delete response
-// import "google/protobuf/field_mask.proto"; // Nếu cần cho Update (partial update)
-
+import "google/protobuf/empty.proto";
 
 // ----- Chính: SeatMap Message -----
 message SeatMap {
-  string id = 1;                      // MongoDB ObjectId (string)
-  string event_id = 2;                // ID của Event liên quan
+  string id = 1;
+  string event_id = 2;
   StageConfig stage_config = 3;
   repeated Section sections = 4;
-  // int64 created_at = 5; // Nếu cần timestamp
-  // int64 updated_at = 6;
 }
 
 message StageConfig {
   Dimensions dimensions = 1;
   Position position = 2;
-  string shape = 3;         // ví dụ: "rectangle", "circle", "freeform"
+  string shape = 3;
 }
 
 message Section {
-  string id = 1;            // ID của section (có thể là MongoDB ObjectId cho sub-doc, hoặc client-defined)
-  string name = 2;            // Tên section (ví dụ: "Khu A", "Tầng 1", "Ban Công Trái")
-  string type = 3;            // Loại section (ví dụ: "seated", "standing", "mixed")
-  Position position = 4;      // Vị trí tương đối của section trong seat map
-  Dimensions dimensions = 5;  // Kích thước của section
-  int32 rows = 6;             // Số hàng (nếu là "seated" và có hàng ghế)
-  int32 seats_per_row = 7;    // Số ghế mỗi hàng (nếu là "seated" và có hàng ghế)
-  string color = 8;           // Màu sắc đại diện cho section trên bản đồ
-  string price_category_id = 9;// ID của loại giá/loại vé áp dụng cho section này (tham chiếu đến TicketType.id ?)
-  string price_description = 10; // Hoặc mô tả giá trực tiếp như "1,000,000 VND"
-                                // int64 price_value = 11; // Nếu muốn lưu giá trị số
-                                // string price_currency = 12; // Nếu muốn lưu đơn vị tiền tệ
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  Position position = 4;
+  Dimensions dimensions = 5;
+  int32 rows = 6;
+  int32 seats_per_row = 7;
+  string color = 8;
+  string price_category_id = 9;
+  string price_description = 10;
+  // ✅ THÊM: Field để lưu config ghế linh hoạt
+  string rows_config_input = 11;  // e.g., "1:10,2:8,3:12" (start:count format)
 }
 
 message Position {
   int32 x = 1;
   int32 y = 2;
-  int32 rotation = 3; // Độ xoay (0-359 độ)
+  int32 rotation = 3;
 }
 
 message Dimensions {
@@ -50,83 +46,70 @@ message Dimensions {
 }
 
 // ----- SeatMapService -----
-service SeatMapService { // Đổi tên service cho rõ ràng hơn
-  // Tạo một sơ đồ chỗ ngồi mới cho một sự kiện
+service SeatMapService {
   rpc CreateSeatMap(CreateSeatMapRequest) returns (SeatMapResponse) {
     option (google.api.http) = {
-      post: "/v1/events/{event_id}/seatmap" // Tạo seatmap cho một event_id cụ thể
-      body: "*" // stage_config và sections sẽ nằm trong body
+      post: "/v1/events/{event_id}/seatmap"
+      body: "*"
     };
   }
 
-  // Lấy thông tin chi tiết của một sơ đồ chỗ ngồi
   rpc GetSeatMap(GetSeatMapRequest) returns (SeatMapResponse) {
     option (google.api.http) = {
       get: "/v1/seatmaps/{seat_map_id}"
     };
   }
   
-  // Lấy sơ đồ chỗ ngồi theo event_id (nếu một event chỉ có một seatmap)
   rpc GetSeatMapByEvent(GetSeatMapByEventRequest) returns (SeatMapResponse) {
     option (google.api.http) = {
       get: "/v1/events/{event_id}/seatmap"
     };
   }
 
-  // Cập nhật toàn bộ sơ đồ chỗ ngồi (thay thế hoàn toàn)
-  // Nếu muốn cập nhật một phần, cần dùng FieldMask và RPC riêng hoặc logic phức tạp hơn
   rpc UpdateSeatMap(UpdateSeatMapRequest) returns (SeatMapResponse) {
     option (google.api.http) = {
       put: "/v1/seatmaps/{seat_map_id}"
-      body: "*" // Toàn bộ các trường cần update (trừ seat_map_id và event_id trong body)
+      body: "*"
     };
   }
 
-  // Xóa một sơ đồ chỗ ngồi
   rpc DeleteSeatMap(DeleteSeatMapRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
       delete: "/v1/seatmaps/{seat_map_id}"
     };
   }
 
-  // List tất cả seatmap (có thể không cần thiết) hoặc theo filter nào đó
-  // Hiện tại bạn có ListSeatMapsRequest với event_id, nên sẽ là ListSeatMapsByEvent
-  // Tuy nhiên, một event thường chỉ có 1 seatmap, nên GetSeatMapByEvent có thể phù hợp hơn là List.
-  // Giữ lại List cho trường hợp tổng quát, nhưng GetSeatMapByEvent hữu ích hơn.
   rpc ListSeatMaps(ListSeatMapsRequest) returns (ListSeatMapsResponse) {
      option (google.api.http) = {
-       get: "/v1/seatmaps" // Ví dụ: /v1/seatmaps?event_id=xxx
+       get: "/v1/seatmaps"
      };
   }
 }
 
 // ----- Request/Response Messages -----
 message CreateSeatMapRequest {
-  string event_id = 1;          // Event ID mà seatmap này thuộc về (sẽ là path param)
-  StageConfig stage_config = 2; // Thông tin stage sẽ nằm trong body
-  repeated Section sections = 3;  // Thông tin sections sẽ nằm trong body
+  string event_id = 1;
+  StageConfig stage_config = 2;
+  repeated Section sections = 3;
 }
 
-// Sử dụng SeatMap message chung cho response
 message SeatMapResponse {
   SeatMap seat_map = 1;
 }
 
 message GetSeatMapRequest {
-  string seat_map_id = 1; // ID của SeatMap (MongoDB ObjectId)
+  string seat_map_id = 1;
 }
 
 message GetSeatMapByEventRequest {
-  string event_id = 1; // ID của Event (MongoDB ObjectId)
+  string event_id = 1;
 }
 
 message UpdateSeatMapRequest {
-  string seat_map_id = 1;       // ID của SeatMap cần cập nhật (path param)
-  // event_id có thể không cần trong body nếu nó không thay đổi, hoặc để xác minh
-  string event_id_to_verify = 2; // Tùy chọn: để xác minh seat_map_id thuộc đúng event_id
-  StageConfig stage_config = 3;   // Dữ liệu mới cho stage
-  repeated Section sections = 4;    // Dữ liệu mới cho sections
-  // google.protobuf.FieldMask update_mask = 5; // Nếu muốn partial update
+  string seat_map_id = 1;
+  string event_id_to_verify = 2;
+  StageConfig stage_config = 3;
+  repeated Section sections = 4;
 }
 
 message DeleteSeatMapRequest {
@@ -134,13 +117,9 @@ message DeleteSeatMapRequest {
 }
 
 message ListSeatMapsRequest {
-  string event_id = 1; // Lọc theo event_id (sẽ là query param)
-  // Thêm pagination nếu cần
-  // int32 page_size = 2;
-  // string page_token = 3;
+  string event_id = 1;
 }
 
 message ListSeatMapsResponse {
   repeated SeatMap seat_maps = 1;
-  // string next_page_token = 2;
 }

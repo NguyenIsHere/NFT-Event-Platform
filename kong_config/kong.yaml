@@ -204,6 +204,12 @@ routes:
     methods: [GET]
     strip_path: false
 
+  - name: tickettype-get-with-availability-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/ticket-types/(?<ticket_type_id>[^/]+)/availability$"]
+    methods: [GET]
+    strip_path: false
+
   - name: ticket-list-all-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/all$"]
@@ -284,6 +290,18 @@ routes:
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+  
+  - name: ticket-sold-seats-by-event-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/tickets/sold-seats/event/(?<event_id>[^/]+)$"]
+    methods: [GET]
+    strip_path: false
+  
+  - name: ticket-metadata-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/tickets/metadata/(?<ticket_id>[^/]+)$"]
+    methods: [GET]
+    strip_path: false
 
   # === SeatMap Service Routes ===
   - name: seatmap-create-for-event-route-v1

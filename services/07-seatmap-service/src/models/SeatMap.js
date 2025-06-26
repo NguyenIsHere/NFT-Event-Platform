@@ -36,10 +36,11 @@ const sectionSchema = new Schema(
     position: { type: positionSchema, required: true },
     dimensions: { type: dimensionsSchema, required: true },
     rows: { type: Number, default: 0 },
-    seats_per_row: { type: Number, default: 0 }, // Đổi tên từ proto cho nhất quán JS
+    seats_per_row: { type: Number, default: 0 },
     color: { type: String, trim: true },
-    price_category_id: { type: String, trim: true }, // Có thể là ObjectId string nếu tham chiếu
-    price_description: { type: String, trim: true }
+    price_category_id: { type: String, trim: true },
+    price_description: { type: String, trim: true },
+    rows_config_input: { type: String, trim: true, default: '' }
   },
   {
     _id: true, // Cho phép Mongoose tự tạo _id cho mỗi section

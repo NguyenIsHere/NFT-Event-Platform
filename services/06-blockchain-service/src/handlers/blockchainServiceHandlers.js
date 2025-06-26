@@ -123,35 +123,22 @@ async function prepareGasOptions () {
   return txOptions
 }
 
+// ✅ FIX: Register Event Only (no price/supply)
 async function RegisterEventOnBlockchain (call, callback) {
-  const {
-    system_event_id_for_ref,
-    blockchain_event_id,
-    price_wei,
-    total_supply
-  } = call.request
-  console.log(
-    `RegisterEventOnBlockchain called for system_event_id: ${system_event_id_for_ref}, blockchain_event_id: ${blockchain_event_id}`
-  )
+  const { system_event_id_for_ref, blockchain_event_id, event_name } =
+    call.request
 
   try {
     const eventIdBN = BigInt(blockchain_event_id)
-    const priceWeiBN = BigInt(price_wei)
-    const totalSupplyBN = BigInt(total_supply)
-
     const txOptions = await prepareGasOptions()
 
-    console.log(
-      `Calling contract.createEvent(${eventIdBN}, ${priceWeiBN}, ${totalSupplyBN}) with txOptions:`,
-      txOptions
-    )
+    console.log(`Calling contract.createEvent(${eventIdBN}, "${event_name}")`)
     const tx = await eventTicketNFTContract.createEvent(
       eventIdBN,
-      priceWeiBN,
-      totalSupplyBN,
+      event_name,
       txOptions
     )
-    console.log(`Transaction sent for createEvent, hash: ${tx.hash}`)
+
     const receipt = await waitForTransaction(tx)
 
     callback(null, {
@@ -161,15 +148,61 @@ async function RegisterEventOnBlockchain (call, callback) {
     })
   } catch (error) {
     console.error('RegisterEventOnBlockchain Error:', error)
-    let errorMessage = error.message || 'Failed to register event on blockchain'
-    if (error.error && error.error.message) {
-      errorMessage = error.error.message
-    } else if (error.reason) {
-      errorMessage = error.reason
-    }
     callback({
       code: grpc.status.INTERNAL,
-      message: errorMessage
+      message: error.message || 'Failed to register event on blockchain'
+    })
+  }
+}
+
+// ✅ NEW: Register TicketType on Blockchain
+async function RegisterTicketTypeOnBlockchain (call, callback) {
+  const { blockchain_event_id, ticket_type_name, price_wei, total_supply } =
+    call.request
+
+  try {
+    const eventIdBN = BigInt(blockchain_event_id)
+    const priceWeiBN = BigInt(price_wei)
+    const totalSupplyBN = BigInt(total_supply)
+    const txOptions = await prepareGasOptions()
+
+    console.log(
+      `Calling contract.createTicketType(${eventIdBN}, "${ticket_type_name}", ${priceWeiBN}, ${totalSupplyBN})`
+    )
+    const tx = await eventTicketNFTContract.createTicketType(
+      eventIdBN,
+      ticket_type_name,
+      priceWeiBN,
+      totalSupplyBN,
+      txOptions
+    )
+
+    const receipt = await waitForTransaction(tx)
+
+    // Parse logs to get ticketTypeId
+    let blockchainTicketTypeId = '0'
+    for (const log of receipt.logs || []) {
+      try {
+        const parsed = eventTicketNFTContract.interface.parseLog(log)
+        if (parsed.name === 'TicketTypeCreated') {
+          blockchainTicketTypeId = parsed.args.ticketTypeId.toString()
+          break
+        }
+      } catch (e) {
+        // Skip unparseable logs
+      }
+    }
+
+    callback(null, {
+      success: true,
+      transaction_hash: receipt.hash,
+      blockchain_ticket_type_id: blockchainTicketTypeId
+    })
+  } catch (error) {
+    console.error('RegisterTicketTypeOnBlockchain Error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to register ticket type on blockchain'
     })
   }
 }
@@ -232,90 +265,80 @@ async function MintTicket (call, callback) {
   const {
     buyer_address,
     token_uri_cid,
-    blockchain_event_id,
+    blockchain_ticket_type_id, // ✅ CHANGE: Use ticket type ID instead of event ID
     session_id_for_contract
   } = call.request
+
   console.log(
-    `MintTicket called for buyer: ${buyer_address}, event: ${blockchain_event_id}, session: ${session_id_for_contract}, uri: ${token_uri_cid}`
+    `MintTicket called for buyer: ${buyer_address}, ticketTypeId: ${blockchain_ticket_type_id}, session: ${session_id_for_contract}, uri: ${token_uri_cid}`
   )
 
   try {
-    // Lấy giá từ contract cho event này để đưa vào mảng prices cho batchMint
-    const eventIdBN = BigInt(blockchain_event_id)
-    const eventDetails = await eventTicketNFTContract.eventInfo(eventIdBN)
-    if (!eventDetails || eventDetails.price === BigInt(0)) {
-      // eventDetails.price là BigInt
+    // ✅ FIX: Validate ticket type exists on contract
+    const ticketTypeIdBN = BigInt(blockchain_ticket_type_id)
+    const ticketTypeInfo = await eventTicketNFTContract.ticketTypeInfo(
+      ticketTypeIdBN
+    )
+
+    if (!ticketTypeInfo || !ticketTypeInfo.exists) {
       throw new Error(
-        `Event ${blockchain_event_id} not found on blockchain or has no price.`
+        `TicketType ${blockchain_ticket_type_id} not found on blockchain`
       )
     }
-    const priceWeiBN = eventDetails.price
 
-    // Chuyển đổi các ID sang BigInt
     const sessionIdBN = BigInt(session_id_for_contract)
 
-    // Hàm batchMint của bạn nhận mảng, nên chúng ta tạo mảng 1 phần tử
+    // ✅ FIX: Use batchMint with ticketTypeIds
     const uris = [token_uri_cid]
-    const eventIds = [eventIdBN]
+    const ticketTypeIds = [ticketTypeIdBN]
     const sessionIds = [sessionIdBN]
-    const prices = [priceWeiBN] // Giá lấy từ contract
 
     console.log(
-      `Calling contract.batchMint(${buyer_address}, [${uris[0]}], [${eventIds[0]}], [${sessionIds[0]}], [${prices[0]}])`
+      `Calling contract.batchMint(${buyer_address}, [${uris[0]}], [${ticketTypeIds[0]}], [${sessionIds[0]}])`
     )
-    // Giao dịch này được ký bởi signer của blockchain-service (owner của contract)
+
+    const txOptions = await prepareGasOptions()
+
+    // ✅ FIX: Call batchMint with ticketTypeIds
     const tx = await eventTicketNFTContract.batchMint(
       buyer_address,
       uris,
-      eventIds,
+      ticketTypeIds,
       sessionIds,
-      prices
+      txOptions
     )
-    console.log(`Transaction sent for batchMint (single), hash: ${tx.hash}`)
+
+    console.log(`Transaction sent for batchMint, hash: ${tx.hash}`)
     const receipt = await waitForTransaction(tx)
 
-    // Lấy tokenId từ Event TicketMinted
-    // Cần parse logs từ receipt để tìm event TicketMinted và lấy tokenId
-    let mintedTokenId = '0' // Default hoặc giá trị không hợp lệ
+    // Parse logs to get tokenId
+    let mintedTokenId = '0'
     for (const log of receipt.logs || []) {
       try {
         const parsedLog = eventTicketNFTContract.interface.parseLog(log)
         if (parsedLog && parsedLog.name === 'TicketMinted') {
           mintedTokenId = parsedLog.args.tokenId.toString()
           console.log(
-            `Found TicketMinted event: tokenId=${mintedTokenId}, eventId=${parsedLog.args.eventId.toString()}, sessionId=${parsedLog.args.sessionId.toString()}, owner=${
-              parsedLog.args.owner
-            }, price=${parsedLog.args.price.toString()}`
+            `Found TicketMinted event: tokenId=${mintedTokenId}, eventId=${parsedLog.args.eventId.toString()}, ticketTypeId=${parsedLog.args.ticketTypeId.toString()}`
           )
           break
         }
       } catch (e) {
-        // Ignore errors parsing logs that are not from our contract
+        // Ignore logs that aren't from our contract
       }
-    }
-
-    if (mintedTokenId === '0' && receipt.logs?.length > 0) {
-      console.warn(
-        'MintTicket: TicketMinted event not found or tokenId not parsed correctly from logs. Will attempt to read nextTokenId.'
-      )
-      // Fallback: nếu không parse được event, thử đọc nextTokenId và trừ 1
-      // LƯU Ý: Cách này không an toàn 100% nếu có nhiều giao dịch mint đồng thời.
-      // Tốt nhất là dựa vào event log.
-      const nextTokenIdFromContract = await eventTicketNFTContract.nextTokenId()
-      mintedTokenId = (nextTokenIdFromContract - BigInt(1)).toString() // nextTokenId đã tăng lên 1
     }
 
     if (mintedTokenId === '0') {
       throw new Error(
-        'Failed to retrieve minted tokenId from transaction receipt.'
+        'Failed to retrieve minted tokenId from transaction receipt'
       )
     }
 
     callback(null, {
       success: true,
       token_id: mintedTokenId,
-      transaction_hash: receipt.hash, // receipt.transactionHash cho ethers v5
-      owner_address: buyer_address // người mua là người sở hữu
+      transaction_hash: receipt.hash,
+      owner_address: buyer_address
     })
   } catch (error) {
     console.error('MintTicket Error:', error)
@@ -476,6 +499,7 @@ async function ParseTransactionLogs (call, callback) {
 
 module.exports = {
   RegisterEventOnBlockchain,
+  RegisterTicketTypeOnBlockchain,
   GetTicketPaymentDetails,
   MintTicket, // Giữ lại cho admin mint nếu cần
   VerifyTransaction,

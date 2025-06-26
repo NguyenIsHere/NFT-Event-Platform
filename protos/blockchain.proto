@@ -11,6 +11,8 @@ service BlockchainService {
     // Endpoint này có thể không cần expose qua Kong nếu chỉ gọi nội bộ
   }
 
+  rpc RegisterTicketTypeOnBlockchain(RegisterTicketTypeOnBlockchainRequest) returns (RegisterTicketTypeOnBlockchainResponse);
+
   // Được gọi bởi TicketService để lấy thông tin cần thiết cho việc thanh toán
   rpc GetTicketPaymentDetails(GetTicketPaymentDetailsRequest) returns (GetTicketPaymentDetailsResponse) {
     // Không cần expose qua Kong nếu chỉ gọi nội bộ
@@ -30,13 +32,6 @@ service BlockchainService {
 }
 
 // ----- Messages -----
-message RegisterEventOnBlockchainRequest {
-  string system_event_id_for_ref = 1; // ID của sự kiện trong event-service (MongoDB ObjectId dạng string)
-  string blockchain_event_id = 2;     // ID (uint256) bạn muốn dùng cho sự kiện trên contract (dạng string)
-  string price_wei = 3;               // Giá vé mặc định (dưới dạng chuỗi Wei)
-  string total_supply = 4;            // Tổng số vé (uint256, dạng string)
-}
-
 message RegisterEventOnBlockchainResponse {
   bool success = 1;
   string transaction_hash = 2;
@@ -57,12 +52,10 @@ message GetTicketPaymentDetailsResponse {
 }
 
 message MintTicketRequest {
-  string buyer_address = 1;           // Địa chỉ ví của người mua
-  string token_uri_cid = 2;           // CID của metadata JSON của vé (ví dụ: "ipfs://CID...")
-  string blockchain_event_id = 3;     // ID của sự kiện trên contract (uint256, dạng string)
-  string session_id_for_contract = 4; // Session ID (uint256, dạng string)
-  // string value_sent_wei = 5;       // Không cần cho batchMint (onlyOwner), nhưng có thể dùng để tham khảo
-                                      // hoặc nếu bạn có logic off-chain payment verification
+  string buyer_address = 1;
+  string token_uri_cid = 2;
+  string blockchain_ticket_type_id = 3; // ✅ CHANGE: Use ticket type ID
+  string session_id_for_contract = 4;
 }
 
 message MintTicketResponse {
@@ -95,4 +88,25 @@ message ParseTransactionLogsResponse {
   string minted_token_id = 2;
   string event_id = 3;
   string session_id = 4;
+}
+
+// ✅ NEW: Messages for ticket type registration
+message RegisterTicketTypeOnBlockchainRequest {
+  string blockchain_event_id = 1;
+  string ticket_type_name = 2;
+  string price_wei = 3;
+  string total_supply = 4;
+}
+
+message RegisterTicketTypeOnBlockchainResponse {
+  bool success = 1;
+  string transaction_hash = 2;
+  string blockchain_ticket_type_id = 3;
+}
+
+// ✅ FIX: Update RegisterEventOnBlockchain (remove price/supply)
+message RegisterEventOnBlockchainRequest {
+  string system_event_id_for_ref = 1;
+  string blockchain_event_id = 2;
+  string event_name = 3; // ✅ ADD: Event name
 }
