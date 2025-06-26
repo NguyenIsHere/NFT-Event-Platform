@@ -224,49 +224,145 @@ async function GetCheckinAnalytics (call, callback) {
   const { event_id, time_period } = call.request
 
   try {
-    const match = { eventId: event_id, status: TICKET_STATUS_ENUM[4] } // MINTED only
+    console.log(`🔍 GetCheckinAnalytics called:`, {
+      event_id,
+      time_period,
+      timestamp: new Date().toISOString()
+    })
 
-    // Time range cho real-time tracking
-    if (time_period === 'TODAY') {
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      match.checkInTime = { $gte: today }
+    // ✅ FIX: Base query - chỉ lấy tickets đã minted và có check-in time
+    const baseMatch = {
+      eventId: event_id,
+      status: TICKET_STATUS_ENUM[4], // MINTED
+      checkInStatus: 'CHECKED_IN', // ✅ THÊM: Chỉ lấy tickets đã check-in
+      checkInTime: { $exists: true, $ne: null } // ✅ THÊM: Phải có checkInTime
     }
 
-    // Hourly check-in trend (hôm nay)
+    // ✅ FIX: Time range filtering
+    if (time_period === 'TODAY') {
+      const today = new Date()
+      const startOfToday = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate(),
+        0,
+        0,
+        0,
+        0
+      )
+      const endOfToday = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate(),
+        23,
+        59,
+        59,
+        999
+      )
+
+      baseMatch.checkInTime = {
+        $gte: startOfToday,
+        $lte: endOfToday
+      }
+
+      console.log(`📅 TODAY filter applied:`, {
+        startOfToday: startOfToday.toISOString(),
+        endOfToday: endOfToday.toISOString(),
+        currentTime: new Date().toISOString()
+      })
+    } else if (time_period === 'WEEK') {
+      const today = new Date()
+      const startOfWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+      baseMatch.checkInTime = { $gte: startOfWeek }
+    }
+    // For 'ALL' - no time filter
+
+    console.log(`🔍 Base match query:`, JSON.stringify(baseMatch, null, 2))
+
+    // ✅ FIX: Debug - count total matching tickets first
+    const totalMatchingTickets = await Ticket.countDocuments(baseMatch)
+    console.log(`📊 Total tickets matching criteria: ${totalMatchingTickets}`)
+
+    // ✅ FIX: Hourly check-in trend với better aggregation
     const hourlyCheckins = await Ticket.aggregate([
+      { $match: baseMatch },
       {
-        $match: {
-          ...match,
-          checkInTime: { $exists: true }
+        $addFields: {
+          checkInHour: {
+            $hour: { date: '$checkInTime', timezone: 'Asia/Ho_Chi_Minh' }
+          }
         }
       },
       {
         $group: {
-          _id: { $hour: '$checkInTime' },
-          count: { $sum: 1 }
+          _id: '$checkInHour',
+          count: { $sum: 1 },
+          tickets: {
+            $push: {
+              // ✅ DEBUG: Collect ticket details
+              id: '$_id',
+              checkInTime: '$checkInTime'
+            }
+          }
         }
       },
       { $sort: { _id: 1 } }
     ])
 
-    // Check-in by location
+    console.log(
+      `📊 Hourly checkins aggregation result:`,
+      JSON.stringify(hourlyCheckins, null, 2)
+    )
+
+    // ✅ FIX: Check-in by location với debugging
     const locationStats = await Ticket.aggregate([
       {
         $match: {
           eventId: event_id,
-          checkInStatus: 'CHECKED_IN'
+          checkInStatus: 'CHECKED_IN',
+          checkInTime: { $exists: true, $ne: null }
         }
       },
       {
         $group: {
           _id: '$checkInLocation',
+          count: { $sum: 1 },
+          tickets: {
+            $push: {
+              // ✅ DEBUG: Collect ticket details
+              id: '$_id',
+              checkInTime: '$checkInTime',
+              location: '$checkInLocation'
+            }
+          }
+        }
+      }
+    ])
+
+    console.log(
+      `📍 Location stats result:`,
+      JSON.stringify(locationStats, null, 2)
+    )
+
+    // ✅ FIX: Summary statistics
+    const summary = await Ticket.aggregate([
+      {
+        $match: {
+          eventId: event_id,
+          status: TICKET_STATUS_ENUM[4] // MINTED only
+        }
+      },
+      {
+        $group: {
+          _id: '$checkInStatus',
           count: { $sum: 1 }
         }
       }
     ])
 
-    callback(null, {
+    console.log(`📋 Check-in summary:`, JSON.stringify(summary, null, 2))
+
+    const response = {
       event_id,
       time_period: time_period || 'ALL',
       hourly_checkins: hourlyCheckins.map(h => ({
@@ -278,11 +374,17 @@ async function GetCheckinAnalytics (call, callback) {
         count: l.count
       })),
       summary: {
-        total_checked_in: locationStats.reduce((sum, l) => sum + l.count, 0)
+        total_checked_in: summary.find(s => s._id === 'CHECKED_IN')?.count || 0,
+        total_not_checked_in:
+          summary.find(s => s._id === 'NOT_CHECKED_IN')?.count || 0
       }
-    })
+    }
+
+    console.log(`✅ Final response:`, JSON.stringify(response, null, 2))
+
+    callback(null, response)
   } catch (error) {
-    console.error('Analytics: GetCheckinAnalytics error:', error)
+    console.error('❌ Analytics: GetCheckinAnalytics error:', error)
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to get checkin analytics'
