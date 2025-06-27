@@ -44,7 +44,17 @@ async function UpdateUser (call, callback) {
     if (wallet_address !== undefined)
       updateData.walletAddress =
         wallet_address === '' ? undefined : wallet_address
-    if (avatar_cid !== undefined) updateData.avatarCid = avatar_cid
+    // ✅ FIX: Chỉ update avatarCid khi có giá trị thực sự
+    if (avatar_cid !== undefined && avatar_cid !== '') {
+      console.log('🔍 UpdateUser - Setting avatarCid to:', avatar_cid)
+      updateData.avatarCid = avatar_cid
+    } else {
+      console.log(
+        '🔍 UpdateUser - Skipping avatarCid update (empty or undefined)'
+      )
+    }
+
+    console.log('🔍 UpdateUser - Final updateData:', updateData)
 
     // Check wallet address uniqueness if provided
     if (updateData.walletAddress) {
@@ -168,18 +178,53 @@ async function UpdateUserAvatar (call, callback) {
     const avatarCid = pinResponse.ipfs_hash
     console.log(`Avatar pinned successfully. CID: ${avatarCid}`)
 
-    // 2. Cập nhật CID vào User model
+    // 🔴 VẤN ĐỀ: Có thể bạn đang update sai field name
+    console.log('🔍 About to update user with data:', {
+      userId: user_id,
+      avatarCid: avatarCid, // ✅ Đây phải là tên field chính xác
+      updateQuery: { $set: { avatarCid: avatarCid } }
+    })
+
+    // ✅ FIX: Thêm log trước khi update
+    const userBeforeUpdate = await User.findById(user_id)
+    console.log('🔍 User BEFORE update:', {
+      id: userBeforeUpdate?._id,
+      email: userBeforeUpdate?.email,
+      avatarCid: userBeforeUpdate?.avatarCid,
+      allFields: Object.keys(userBeforeUpdate?.toObject() || {})
+    })
+
+    // ✅ FIX: Sử dụng $unset trước, sau đó $set để đảm bảo field được ghi đè
+    await User.findByIdAndUpdate(
+      user_id,
+      { $unset: { avatarCid: '' } },
+      { new: false }
+    )
+
     const updatedUser = await User.findByIdAndUpdate(
       user_id,
       { $set: { avatarCid: avatarCid } },
       { new: true, runValidators: true }
     )
 
-    console.log(`🔍 Update operation result:`, {
+    console.log('🔍 User AFTER update:', {
       found: !!updatedUser,
-      id: updatedUser?.id,
+      id: updatedUser?._id,
       email: updatedUser?.email,
-      avatarCid: updatedUser?.avatarCid
+      avatarCid: updatedUser?.avatarCid,
+      rawDoc: updatedUser?.toObject()
+    })
+
+    // ✅ FIX: Kiểm tra bằng raw MongoDB query
+    const rawUser = await mongoose.connection.db
+      .collection('users')
+      .findOne({ _id: new mongoose.Types.ObjectId(user_id) })
+
+    console.log('🔍 Raw MongoDB document:', {
+      _id: rawUser?._id,
+      email: rawUser?.email,
+      avatarCid: rawUser?.avatarCid,
+      allKeys: Object.keys(rawUser || {})
     })
 
     if (!updatedUser) {
@@ -189,17 +234,7 @@ async function UpdateUserAvatar (call, callback) {
       })
     }
 
-    // ✅ THÊM: Kiểm tra lại trong database để đảm bảo
-    const verificationUser = await User.findById(user_id)
-    console.log(`🔍 Verification check after update:`, {
-      found: !!verificationUser,
-      avatarCid: verificationUser?.avatarCid,
-      updatedAt: verificationUser?.updatedAt
-    })
-
-    console.log(`User ${user_id} avatar CID updated to ${avatarCid}`)
-
-    // ✅ FIX: Trả về response thành công
+    console.log(`✅ User ${user_id} avatar CID updated to ${avatarCid}`)
     callback(null, userToUserResponse(updatedUser))
   } catch (error) {
     console.error('UpdateUserAvatar Error:', error)
