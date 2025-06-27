@@ -175,12 +175,27 @@ async function UpdateUserAvatar (call, callback) {
       { new: true, runValidators: true }
     )
 
+    console.log(`🔍 Update operation result:`, {
+      found: !!updatedUser,
+      id: updatedUser?.id,
+      email: updatedUser?.email,
+      avatarCid: updatedUser?.avatarCid
+    })
+
     if (!updatedUser) {
       return callback({
         code: grpc.status.NOT_FOUND,
         message: 'User not found after pinning avatar.'
       })
     }
+
+    // ✅ THÊM: Kiểm tra lại trong database để đảm bảo
+    const verificationUser = await User.findById(user_id)
+    console.log(`🔍 Verification check after update:`, {
+      found: !!verificationUser,
+      avatarCid: verificationUser?.avatarCid,
+      updatedAt: verificationUser?.updatedAt
+    })
 
     console.log(`User ${user_id} avatar CID updated to ${avatarCid}`)
 
