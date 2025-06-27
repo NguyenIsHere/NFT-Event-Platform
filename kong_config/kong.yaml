@@ -231,6 +231,12 @@ routes:
     methods: [POST]
     strip_path: false
 
+  - name: ticket-prepare-metadata-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/tickets/prepare-metadata$"]
+    methods: [POST]
+    strip_path: false
+
   - name: ticket-confirm-payment-mint-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/confirm-payment-mint$"]

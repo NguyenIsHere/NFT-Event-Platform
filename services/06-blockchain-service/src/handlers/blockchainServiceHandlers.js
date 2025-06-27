@@ -220,24 +220,33 @@ async function GetTicketPaymentDetails (call, callback) {
     if (blockchain_event_id && BigInt(blockchain_event_id) > 0) {
       try {
         const eventIdBN = BigInt(blockchain_event_id)
+
+        // ✅ FIX: Check if event exists on contract
         const eventDetails = await eventTicketNFTContract.eventInfo(eventIdBN)
-        if (eventDetails && eventDetails.price > 0) {
-          // eventDetails.price là BigInt
-          priceToPayWei = eventDetails.price.toString()
+        console.log(`📋 Event ${blockchain_event_id} details from contract:`, {
+          exists: eventDetails?.exists || false,
+          name: eventDetails?.name || 'N/A'
+        })
+
+        if (eventDetails && eventDetails.exists) {
           console.log(
-            `Price for event ${blockchain_event_id} from contract: ${priceToPayWei} wei`
+            `✅ Event ${blockchain_event_id} found on contract: ${eventDetails.name}`
+          )
+          // ✅ FIX: For this contract, we ALWAYS use price from ticket type since events don't store price
+          console.log(
+            `Using price from ticket type: ${price_wei_from_ticket_type}`
           )
         } else {
           console.warn(
-            `Event ${blockchain_event_id} not found or price is zero on contract. Using price from ticket type: ${price_wei_from_ticket_type}`
+            `❌ Event ${blockchain_event_id} not found on contract. Using price from ticket type: ${price_wei_from_ticket_type}`
           )
         }
       } catch (contractError) {
         console.error(
-          `Error fetching event info from contract for event ${blockchain_event_id}:`,
+          `❌ Error fetching event info from contract for event ${blockchain_event_id}:`,
           contractError.message
         )
-        console.warn(
+        console.log(
           `Using price from ticket type: ${price_wei_from_ticket_type} due to contract query error.`
         )
       }
@@ -250,7 +259,6 @@ async function GetTicketPaymentDetails (call, callback) {
     callback(null, {
       payment_contract_address: paymentContractAddress,
       price_to_pay_wei: priceToPayWei
-      // chain_id: (await provider.getNetwork()).chainId.toString() // Nếu cần chain_id
     })
   } catch (error) {
     console.error('GetTicketPaymentDetails Error:', error)
@@ -506,7 +514,25 @@ async function ParseTransactionLogs (call, callback) {
   console.log(`ParseTransactionLogs called for hash: ${transaction_hash}`)
 
   try {
+    // ✅ FIX: Validate transaction hash
+    if (!transaction_hash || typeof transaction_hash !== 'string') {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Transaction hash is required and must be a string'
+      })
+    }
+
+    if (transaction_hash.length !== 66 || !transaction_hash.startsWith('0x')) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message:
+          'Transaction hash must be a valid hex string (66 characters, starting with 0x)'
+      })
+    }
+
+    console.log(`📋 Getting receipt for transaction: ${transaction_hash}`)
     const receipt = await provider.getTransactionReceipt(transaction_hash)
+
     if (!receipt) {
       return callback({
         code: grpc.status.NOT_FOUND,
@@ -514,32 +540,68 @@ async function ParseTransactionLogs (call, callback) {
       })
     }
 
-    let mintedTokenId = null
+    console.log(`📋 Transaction receipt:`, {
+      hash: receipt.hash,
+      status: receipt.status,
+      gasUsed: receipt.gasUsed?.toString(),
+      logsCount: receipt.logs?.length || 0
+    })
+
+    if (receipt.status !== 1) {
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: 'Transaction failed on blockchain'
+      })
+    }
+
+    let mintedTokenIds = []
     let eventId = null
     let sessionId = null
 
-    // Parse logs để tìm TicketMinted event
+    // ✅ FIX: Parse all TicketMinted events (for multiple tickets)
     for (const log of receipt.logs || []) {
       try {
         const parsedLog = eventTicketNFTContract.interface.parseLog(log)
         if (parsedLog && parsedLog.name === 'TicketMinted') {
-          mintedTokenId = parsedLog.args.tokenId.toString()
-          eventId = parsedLog.args.eventId.toString()
-          sessionId = parsedLog.args.sessionId.toString()
+          const tokenId = parsedLog.args.tokenId.toString()
+          mintedTokenIds.push(tokenId)
 
-          console.log(
-            `Found TicketMinted: tokenId=${mintedTokenId}, eventId=${eventId}, sessionId=${sessionId}`
-          )
-          break
+          if (!eventId) {
+            eventId = parsedLog.args.eventId.toString()
+          }
+          if (!sessionId) {
+            sessionId = parsedLog.args.sessionId.toString()
+          }
+
+          console.log(`🎫 Found TicketMinted event:`, {
+            tokenId,
+            eventId: parsedLog.args.eventId.toString(),
+            ticketTypeId: parsedLog.args.ticketTypeId.toString(),
+            owner: parsedLog.args.owner,
+            price: parsedLog.args.price.toString()
+          })
         }
-      } catch (e) {
-        // Ignore logs that aren't from our contract
+      } catch (parseError) {
+        console.log('⚠️ Could not parse log:', parseError.message)
       }
     }
 
+    if (mintedTokenIds.length === 0) {
+      console.warn('⚠️ No TicketMinted events found in transaction logs')
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'No ticket minting events found in transaction'
+      })
+    }
+
+    console.log(
+      `✅ Successfully parsed ${mintedTokenIds.length} TicketMinted events`
+    )
+
     callback(null, {
       success: true,
-      minted_token_id: mintedTokenId || '',
+      minted_token_id: mintedTokenIds[0], // Return first token ID for compatibility
+      minted_token_ids: mintedTokenIds, // ✅ FIX: Return all token IDs
       event_id: eventId || '',
       session_id: sessionId || ''
     })

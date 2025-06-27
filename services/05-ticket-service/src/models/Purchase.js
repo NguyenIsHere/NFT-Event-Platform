@@ -43,7 +43,13 @@ const purchaseSchema = new Schema(
     purchaseDetails: {
       type: Object,
       required: true
-    }
+    },
+    // ✅ ADD: metadataUris field
+    metadataUris: [
+      {
+        type: String
+      }
+    ]
   },
   {
     timestamps: true

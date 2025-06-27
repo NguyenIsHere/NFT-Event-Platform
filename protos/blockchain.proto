@@ -86,8 +86,9 @@ message ParseTransactionLogsRequest {
 message ParseTransactionLogsResponse {
   bool success = 1;
   string minted_token_id = 2;
-  string event_id = 3;
-  string session_id = 4;
+  repeated string minted_token_ids = 3; 
+  string event_id = 4;
+  string session_id = 5;
 }
 
 // ✅ NEW: Messages for ticket type registration

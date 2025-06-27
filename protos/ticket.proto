@@ -62,6 +62,13 @@ service TicketService {
     };
   }
 
+  rpc PrepareMetadata(PrepareMetadataRequest) returns (PrepareMetadataResponse) {
+    option (google.api.http) = {
+      post: "/v1/tickets/prepare-metadata"
+      body: "*"
+    };
+  }
+
   rpc ConfirmPaymentAndRequestMint(ConfirmPaymentAndRequestMintRequest) returns (ConfirmPaymentAndRequestMintResponse) {
     option (google.api.http) = {
       post: "/v1/tickets/confirm-payment-mint"
@@ -495,4 +502,15 @@ message GetTicketMetadataRequest {
 
 message GetTicketMetadataResponse {
   string metadata = 1;
+}
+
+message PrepareMetadataRequest {
+  string ticket_order_id = 1;
+  int32 quantity = 2;
+  repeated string selected_seats = 3;
+}
+
+message PrepareMetadataResponse {
+  bool success = 1;
+  repeated string metadata_uris = 2;
 }
