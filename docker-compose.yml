@@ -72,7 +72,9 @@ services:
       - microservices_network
     depends_on:
       consul:
-        condition: service_healthy 
+        condition: service_healthy
+      ipfs-service:
+        condition: service_started 
 
   event-service: 
     build:

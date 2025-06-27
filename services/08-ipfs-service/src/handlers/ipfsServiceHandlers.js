@@ -48,30 +48,43 @@ async function PinFileToIPFS (call, callback) {
       })
     }
 
+    // Kong gateway sẽ gửi trường 'bytes' dưới dạng một chuỗi base64.
+    // Chúng ta cần chuyển nó thành Buffer nhị phân thực sự.
+    let fileBuffer
+    if (typeof file_content === 'string') {
+      console.log('🔍 Received file_content as a base64 string. Decoding...')
+      fileBuffer = Buffer.from(file_content, 'base64')
+    } else if (Buffer.isBuffer(file_content)) {
+      console.log('🔍 Received file_content as a Buffer. Using as is.')
+      fileBuffer = file_content
+    } else {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid file_content type. Expected base64 string or Buffer.'
+      })
+    }
+
     const pinataAPIOptions = {}
     if (options) {
       if (options.pin_name) {
         pinataAPIOptions.name = options.pin_name
       }
-      // options.key_values is a map<string, string> in proto,
-      // which proto-loader (with keepCase: true) usually converts to an object.
       if (options.key_values && Object.keys(options.key_values).length > 0) {
         pinataAPIOptions.keyvalues = options.key_values
       }
     }
 
-    // file_content is bytes, which is a Buffer in Node.js gRPC
     const pinataResponse = await pinFileToIPFS(
-      file_content,
+      fileBuffer,
       original_file_name,
       pinataAPIOptions
     )
 
     callback(null, {
       ipfs_hash: pinataResponse.IpfsHash,
-      pin_size_bytes: parseInt(pinataResponse.PinSize, 10), // PinSize can be string or number
+      pin_size_bytes: parseInt(pinataResponse.PinSize, 10),
       timestamp: pinataResponse.Timestamp,
-      gateway_url: `https://gateway.pinata.cloud/ipfs/${pinataResponse.IpfsHash}` // Hoặc gateway bạn muốn dùng
+      gateway_url: `https://gateway.pinata.cloud/ipfs/${pinataResponse.IpfsHash}`
     })
   } catch (error) {
     console.error('PinFileToIPFS RPC error:', error)

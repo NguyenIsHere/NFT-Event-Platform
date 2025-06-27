@@ -25,21 +25,9 @@ service UserService {
         };
     }
     rpc CreateUser (CreateUserRequest) returns (UserResponse) {
-        // UserService thường không expose CreateUser trực tiếp qua REST
-        // mà thông qua AuthService.Register. Nếu muốn expose, bạn có thể thêm:
-        // option (google.api.http) = {
-        //     post: "/v1/users"
-        //     body: "*"
-        // };
+
     }
     rpc AuthenticateUser (AuthenticateUserRequest) returns (UserResponse) {
-    // AuthenticateUser cũng thường không expose trực tiếp qua REST
-    // mà được AuthService.Login gọi nội bộ qua gRPC.
-    // Nếu muốn expose, bạn có thể thêm:
-    // option (google.api.http) = {
-    //     post: "/v1/users/authenticate"
-    //     body: "*"
-    // };
     }
 
     rpc UpdateUser (UpdateUserRequest) returns (UserResponse) {
@@ -48,6 +36,19 @@ service UserService {
             body: "*"
         };
     }
+
+    rpc UpdateUserAvatar(UpdateUserAvatarRequest) returns (UserResponse) {
+        option (google.api.http) = {
+            put: "/v1/users/{user_id}/avatar"
+            body: "*"
+        };
+    }
+}
+
+message UpdateUserAvatarRequest {
+    string user_id = 1;
+    bytes avatar_file_content = 2; // Nội dung file avatar, client gửi dạng base64 string
+    string original_file_name = 3; // Tên file gốc
 }
 
 message UserRequestById {

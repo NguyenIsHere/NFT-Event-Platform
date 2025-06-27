@@ -141,6 +141,15 @@ routes:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
+  - name: user-update-avatar-route-v1
+    service: user-grpc-service
+    paths: ["~/v1/users/(?<user_id>[^/]+)/avatar$"]
+    methods: [PUT]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
   # === IPFS Service Routes ===
   - name: ipfs-pin-file-route-v1
     service: ipfs-grpc-service

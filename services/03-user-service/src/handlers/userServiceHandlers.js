@@ -1,6 +1,8 @@
 const User = require('../models/User')
 const { comparePassword } = require('../utils/passwordUtils')
 const mongoose = require('mongoose')
+const grpc = require('@grpc/grpc-js')
+const ipfsServiceClient = require('../clients/ipfsServiceClient')
 
 // Hàm chuyển đổi user model sang UserResponse proto
 function userToUserResponse (userDocument) {
@@ -78,6 +80,147 @@ async function UpdateUser (call, callback) {
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Error updating user'
+    })
+  }
+}
+
+async function UpdateUserAvatar (call, callback) {
+  const { user_id, avatar_file_content, original_file_name } = call.request
+  console.log(`UpdateUserAvatar called for user: ${user_id}`)
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(user_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid user ID format.'
+      })
+    }
+    if (!avatar_file_content || avatar_file_content.length === 0) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Avatar file content is required.'
+      })
+    }
+
+    // ✅ FIX: Chuyển đổi chuỗi base64 thành buffer nhị phân
+    let fileBuffer
+    if (typeof avatar_file_content === 'string') {
+      console.log(
+        `🔍 Received base64 string (length: ${avatar_file_content.length})`
+      )
+
+      // ✅ QUAN TRỌNG: Kiểm tra xem base64 có bị double-encoded không
+      try {
+        // Thử decode một lần để xem kết quả có phải binary image không
+        const tempBuffer = Buffer.from(avatar_file_content, 'base64')
+
+        // Kiểm tra xem dữ liệu có vẻ như là image binary không
+        const isLikelyImage =
+          (tempBuffer[0] === 0xff && tempBuffer[1] === 0xd8) || // JPEG
+          (tempBuffer[0] === 0x89 && tempBuffer[1] === 0x50) || // PNG
+          (tempBuffer[0] === 0x47 && tempBuffer[1] === 0x49) // GIF
+
+        if (isLikelyImage) {
+          console.log('✅ Base64 decoded to valid image signature')
+          fileBuffer = tempBuffer
+        } else {
+          // Nếu không phải binary image, có thể là base64 của base64
+          console.log(
+            '⚠️ First decode did not result in image, trying double decode...'
+          )
+
+          // Thử đọc như chuỗi text rồi decode lần nữa
+          const decodedOnce = Buffer.from(
+            avatar_file_content,
+            'base64'
+          ).toString('utf-8')
+          fileBuffer = Buffer.from(decodedOnce, 'base64')
+
+          console.log('✅ Used double decode method')
+        }
+      } catch (decodeError) {
+        console.error('❌ Error during base64 decoding:', decodeError)
+        fileBuffer = Buffer.from(avatar_file_content, 'base64')
+        console.log('⚠️ Falling back to simple decode')
+      }
+    } else {
+      console.log('🔍 Received buffer directly, using as-is')
+      fileBuffer = avatar_file_content
+    }
+
+    console.log(
+      `📦 Final buffer size: ${
+        fileBuffer.length
+      } bytes, first bytes: ${fileBuffer.slice(0, 4).toString('hex')}`
+    )
+
+    // 1. Gọi IPFS Service để pin file
+    console.log(
+      `Calling IPFS service to pin avatar: ${original_file_name} (buffer size: ${fileBuffer.length} bytes)`
+    )
+
+    const pinResponse = await new Promise((resolve, reject) => {
+      ipfsServiceClient.PinFileToIPFS(
+        {
+          file_content: fileBuffer, // ✅ Gửi buffer nhị phân
+          original_file_name,
+          options: {
+            pin_name: `avatar_${user_id}_${Date.now()}`,
+            key_values: { user_id, type: 'avatar' }
+          }
+        },
+        (err, response) => {
+          if (err) return reject(err)
+          resolve(response)
+        }
+      )
+    })
+
+    if (!pinResponse || !pinResponse.ipfs_hash) {
+      throw new Error('Failed to pin avatar to IPFS, no hash returned.')
+    }
+
+    const avatarCid = pinResponse.ipfs_hash
+    console.log(`Avatar pinned successfully. CID: ${avatarCid}`)
+
+    console.log('🔍 Updating user with data:', {
+      userId: user_id,
+      avatarCid: avatarCid,
+      currentTime: new Date().toISOString()
+    })
+
+    try {
+      const updatedUser = await User.findByIdAndUpdate(
+        user_id,
+        { $set: { avatarCid: avatarCid } },
+        { new: true, runValidators: true } // ✅ Thêm runValidators để bắt lỗi validation
+      )
+
+      console.log(
+        '🔍 Database update result:',
+        updatedUser ? 'Success' : 'Failed'
+      )
+
+      if (!updatedUser) {
+        throw new Error(`User ${user_id} not found in database`)
+      }
+
+      // Kiểm tra xác nhận cập nhật thành công
+      const checkUser = await User.findById(user_id)
+      console.log('🔍 Verification check:', {
+        found: !!checkUser,
+        hasAvatar: checkUser ? !!checkUser.avatarCid : false,
+        avatarCid: checkUser ? checkUser.avatarCid : null
+      })
+    } catch (error) {
+      console.error('❌ Database error:', error)
+      throw error
+    }
+  } catch (error) {
+    console.error('UpdateUserAvatar Error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Error updating user avatar'
     })
   }
 }
@@ -280,6 +423,7 @@ module.exports = {
   GetUserById,
   GetUserByEmail,
   UpdateUser,
+  UpdateUserAvatar,
   GetUserByWalletAddress,
   CreateUser,
   AuthenticateUser
