@@ -1,34 +1,32 @@
 require('@nomicfoundation/hardhat-toolbox')
 require('dotenv').config()
 
+const { ETHEREUM_RPC_URL, SIGNER_PRIVATE_KEY, LINEASCAN_API_KEY } = process.env
+
+/** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: '0.8.28',
   networks: {
     lineaSepolia: {
-      url: process.env.ETHEREUM_RPC_URL, // Đọc URL từ .env
-      accounts: process.env.SIGNER_PRIVATE_KEY
-        ? [process.env.SIGNER_PRIVATE_KEY]
-        : [] // Mảng chứa private key
+      url: ETHEREUM_RPC_URL || '',
+      accounts: SIGNER_PRIVATE_KEY ? [SIGNER_PRIVATE_KEY] : [],
+      chainId: 59141
     }
   },
-  paths: {
-    sources: './contracts', // Thư mục chứa contract
-    tests: './test' // Thư mục chứa test
+  // Thêm mục này để cấu hình verify
+  etherscan: {
+    apiKey: {
+      lineaSepolia: LINEASCAN_API_KEY || ''
+    },
+    customChains: [
+      {
+        network: 'lineaSepolia',
+        chainId: 59141,
+        urls: {
+          apiURL: 'https://api-sepolia.lineascan.build/api',
+          browserURL: 'https://sepolia.lineascan.build'
+        }
+      }
+    ]
   }
 }
-
-// module.exports = {
-//   solidity: '0.8.28',
-//   networks: {
-//     sepolia: {
-//       url: process.env.ETHEREUM_RPC_URL, // Đọc URL từ .env
-//       accounts: process.env.SIGNER_PRIVATE_KEY
-//         ? [process.env.SIGNER_PRIVATE_KEY]
-//         : [] // Mảng chứa private key
-//     }
-//   },
-//   paths: {
-//     sources: './contracts', // Thư mục chứa contract
-//     tests: './test' // Thư mục chứa test
-//   }
-// }

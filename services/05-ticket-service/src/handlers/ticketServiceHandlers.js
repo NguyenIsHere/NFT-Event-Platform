@@ -418,12 +418,25 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
           )
         })
 
+        const metadataCid = ipfsResponse.ipfs_hash
+        console.log(`✅ Metadata pinned to IPFS with CID: ${metadataCid}`)
+
+        // 4. ✅ FIX: Construct the full token URI
+        const ipfsGateway = process.env.IPFS_GATEWAY_URL
+        if (!ipfsGateway) {
+          throw new Error(
+            'IPFS_GATEWAY_URL is not defined in ticket-service .env'
+          )
+        }
+        const fullTokenUri = `ipfs://${metadataCid}`
+        console.log(`Constructed full token URI: ${fullTokenUri}`)
+
         // Mint on blockchain
         const mintResponse = await new Promise((resolve, reject) => {
           blockchainServiceClient.MintTicket(
             {
               buyer_address: ticket.ownerAddress,
-              token_uri_cid: `ipfs://${ipfsResponse.ipfs_hash}`,
+              token_uri_cid: fullTokenUri,
               blockchain_ticket_type_id: ticketTypeData.blockchainTicketTypeId,
               session_id_for_contract: ticketTypeData.contractSessionId
             },
