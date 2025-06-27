@@ -16,6 +16,7 @@ const {
   GetOrganizerStats,
   GetCheckinAnalytics
 } = require('./analyticsHandlers')
+const ethers = require('ethers')
 
 // Helper function ticketDocumentToGrpcTicket (giữ nguyên như trước)
 function ticketDocumentToGrpcTicket (ticketDoc) {
@@ -43,7 +44,15 @@ function ticketDocumentToGrpcTicket (ticketDoc) {
     check_in_location: ticketJson.checkInLocation || '',
     expiry_time: ticketDoc.expiryTime
       ? Math.floor(new Date(ticketDoc.expiryTime).getTime() / 1000)
-      : 0
+      : 0,
+    seat_info: ticketJson.seatInfo
+      ? {
+          seat_key: ticketJson.seatInfo.seatKey || '',
+          section: ticketJson.seatInfo.section || '',
+          row: ticketJson.seatInfo.row || '',
+          seat: ticketJson.seatInfo.seat || ''
+        }
+      : null
   }
 }
 
@@ -112,10 +121,48 @@ async function InitiatePurchase (call, callback) {
     }
 
     // Check availability
-    if (ticketType.availableQuantity < finalQuantity) {
+    // ✅ FIX: Better availability management with real-time calculation
+    const currentAvailability = await TicketType.findById(ticket_type_id)
+    if (!currentAvailability) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'TicketType not found.'
+      })
+    }
+
+    // ✅ FIX: Calculate real availability from database
+    const soldTicketsCount = await Ticket.countDocuments({
+      ticketTypeId: ticket_type_id,
+      status: { $in: ['MINTED'] } // Only count actually minted tickets
+    })
+
+    const reservedTicketsCount = await Ticket.countDocuments({
+      ticketTypeId: ticket_type_id,
+      status: { $in: ['PENDING_PAYMENT', 'PAID', 'MINTING'] }, // Include all "in-process" tickets
+      expiryTime: { $gt: new Date() } // Only count non-expired reservations
+    })
+
+    const realAvailableQuantity = Math.max(
+      0,
+      currentAvailability.totalQuantity -
+        soldTicketsCount -
+        reservedTicketsCount
+    )
+
+    console.log('📊 Availability check:', {
+      ticketTypeId: ticket_type_id,
+      totalQuantity: currentAvailability.totalQuantity,
+      soldTickets: soldTicketsCount,
+      reservedTickets: reservedTicketsCount,
+      requestedQuantity: finalQuantity,
+      realAvailable: realAvailableQuantity,
+      dbAvailable: currentAvailability.availableQuantity
+    })
+
+    if (realAvailableQuantity < finalQuantity) {
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
-        message: 'Not enough tickets available.'
+        message: `Chỉ còn ${realAvailableQuantity} vé có sẵn, bạn đang yêu cầu ${finalQuantity} vé.`
       })
     }
 
@@ -215,14 +262,13 @@ async function InitiatePurchase (call, callback) {
 
       if (selectedSeatsArray.length > 0 && selectedSeatsArray[i]) {
         const seatKey = selectedSeatsArray[i]
-        const parts = seatKey.split('-')
-        if (parts.length >= 3) {
-          ticketData.seatInfo = {
-            seatKey: seatKey,
-            section: parts[0],
-            row: parts[1],
-            seat: parts[2]
-          }
+        const [section, row, seat] = seatKey.split('-')
+
+        ticketData.seatInfo = {
+          seatKey: seatKey,
+          section: section,
+          row: row,
+          seat: seat
         }
       }
 
@@ -233,9 +279,17 @@ async function InitiatePurchase (call, callback) {
     // Save all pending tickets
     await Ticket.insertMany(pendingTickets)
 
-    // Temporarily reserve tickets
-    ticketType.availableQuantity -= finalQuantity
-    await ticketType.save()
+    // ✅ FIX: Update availability to reflect reservation (but don't over-subtract)
+    const newAvailableAfterReservation = realAvailableQuantity - finalQuantity
+    if (
+      currentAvailability.availableQuantity !== newAvailableAfterReservation
+    ) {
+      currentAvailability.availableQuantity = newAvailableAfterReservation
+      await currentAvailability.save()
+      console.log(
+        `✅ Updated availability after reservation: ${currentAvailability.availableQuantity}`
+      )
+    }
 
     console.log(`✅ Purchase initiated: ${purchaseId}`)
 
@@ -268,7 +322,7 @@ async function InitiatePurchase (call, callback) {
   }
 }
 
-// ticketServiceHandlers.js - ConfirmPaymentAndRequestMint với validation
+// ticketServiceHandlers.js - ConfirmPaymentAndRequestMint với auto QR generation
 async function ConfirmPaymentAndRequestMint (call, callback) {
   const { ticket_order_id, payment_transaction_hash } = call.request
   console.log(
@@ -276,7 +330,7 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
   )
 
   try {
-    // ✅ FIX: Find purchase record by purchaseId
+    // Find purchase record
     const purchase = await Purchase.findOne({ purchaseId: ticket_order_id })
     if (!purchase) {
       return callback({
@@ -287,30 +341,19 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
 
     if (purchase.status !== 'INITIATED') {
       return callback({
-        code: grpc.status.FAILED_PRECONDITION,
-        message: `Purchase order is already ${purchase.status}.`
-      })
-    }
-
-    // Validate transaction hash format
-    if (
-      !payment_transaction_hash ||
-      !payment_transaction_hash.startsWith('0x')
-    ) {
-      return callback({
         code: grpc.status.INVALID_ARGUMENT,
-        message: 'Invalid transaction hash format.'
+        message: `Purchase order is in ${purchase.status} status, cannot confirm.`
       })
     }
 
-    // ✅ FIX: Find related pending tickets
+    // Find related pending tickets
     const relatedTickets = await Ticket.find({
       ownerAddress: purchase.walletAddress.toLowerCase(),
       ticketTypeId: purchase.ticketTypeId,
       status: 'PENDING_PAYMENT',
       createdAt: {
-        $gte: new Date(purchase.createdAt.getTime() - 5 * 60 * 1000), // 5 minutes before
-        $lte: new Date(purchase.createdAt.getTime() + 5 * 60 * 1000) // 5 minutes after
+        $gte: new Date(purchase.createdAt.getTime() - 5 * 60 * 1000),
+        $lte: new Date(purchase.createdAt.getTime() + 5 * 60 * 1000)
       }
     })
 
@@ -321,67 +364,239 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
       })
     }
 
-    // Verify payment transaction
-    const verificationResponse = await new Promise((resolve, reject) => {
-      blockchainServiceClient.VerifyTransaction(
-        { transaction_hash: payment_transaction_hash },
-        { deadline: new Date(Date.now() + 10000) },
-        (err, res) => {
-          if (err) {
-            console.error('Error verifying transaction:', err)
-            reject(new Error('Failed to verify transaction'))
-          } else {
-            resolve(res)
-          }
-        }
-      )
-    })
+    console.log(`🎫 Found ${relatedTickets.length} tickets to process`)
 
-    if (
-      !verificationResponse.is_confirmed ||
-      !verificationResponse.success_on_chain
-    ) {
-      return callback({
-        code: grpc.status.FAILED_PRECONDITION,
-        message: 'Transaction not confirmed or failed on blockchain.'
-      })
-    }
-
-    // Update purchase status
+    // Update purchase status first
     purchase.status = 'CONFIRMED'
     purchase.transactionHash = payment_transaction_hash
     await purchase.save()
 
-    // Update tickets to PAID status
-    await Ticket.updateMany(
-      { _id: { $in: relatedTickets.map(t => t._id) } },
-      {
-        status: 'PAID',
-        transactionHash: payment_transaction_hash
-      }
-    )
+    // Process each ticket
+    const updatedTickets = []
+    for (const ticket of relatedTickets) {
+      try {
+        // Get event and ticket type data for metadata
+        const [eventResponse, ticketTypeData] = await Promise.all([
+          new Promise((resolve, reject) => {
+            eventServiceClient.GetEvent(
+              { event_id: ticket.eventId },
+              { deadline: new Date(Date.now() + 10000) },
+              (err, res) => {
+                if (err) reject(err)
+                else resolve(res)
+              }
+            )
+          }),
+          TicketType.findById(ticket.ticketTypeId)
+        ])
 
-    // Get updated tickets
-    const updatedTickets = await Ticket.find({
-      _id: { $in: relatedTickets.map(t => t._id) }
-    })
+        if (!eventResponse?.event || !ticketTypeData) {
+          throw new Error('Failed to get event or ticket type data')
+        }
+
+        // Create metadata
+        const metadata = createSimpleMetadata(
+          eventResponse.event,
+          ticketTypeData,
+          ticket
+        )
+
+        // Upload metadata to IPFS
+        const ipfsResponse = await new Promise((resolve, reject) => {
+          ipfsServiceClient.PinJSONToIPFS(
+            {
+              json_content: JSON.stringify(metadata),
+              options: {
+                pin_name: `ticket-metadata-${ticket.id}`
+              }
+            },
+            { deadline: new Date(Date.now() + 30000) },
+            (err, res) => {
+              if (err) reject(err)
+              else resolve(res)
+            }
+          )
+        })
+
+        // Mint on blockchain
+        const mintResponse = await new Promise((resolve, reject) => {
+          blockchainServiceClient.MintTicket(
+            {
+              buyer_address: ticket.ownerAddress,
+              token_uri_cid: `ipfs://${ipfsResponse.ipfs_hash}`,
+              blockchain_ticket_type_id: ticketTypeData.blockchainTicketTypeId,
+              session_id_for_contract: ticketTypeData.contractSessionId
+            },
+            { deadline: new Date(Date.now() + 60000) },
+            (err, res) => {
+              if (err) reject(err)
+              else resolve(res)
+            }
+          )
+        })
+
+        if (!mintResponse.success) {
+          throw new Error('Blockchain mint failed')
+        }
+
+        // Generate QR code
+        // ✅ FIX: Generate QR code properly - destructure the returned object
+        const qrCodeResult = generateQRCodeData(ticket.id, ticket.ownerAddress)
+
+        // Check if generateQRCodeData returns an object or direct values
+        let qrCodeDataString, qrCodeSecret
+
+        if (typeof qrCodeResult === 'object' && qrCodeResult.qrCodeData) {
+          // If it returns an object with qrCodeData and qrCodeSecret
+          qrCodeDataString = qrCodeResult.qrCodeData
+          qrCodeSecret = qrCodeResult.qrCodeSecret
+        } else if (typeof qrCodeResult === 'string') {
+          // If it returns just the QR code data string
+          qrCodeDataString = qrCodeResult
+          qrCodeSecret = null // Will need to generate separately if needed
+        } else {
+          throw new Error('Invalid QR code generation result')
+        }
+
+        // Update ticket
+        ticket.status = 'MINTED'
+        ticket.tokenId = mintResponse.token_id
+        ticket.tokenUriCid = ipfsResponse.ipfs_hash
+        ticket.transactionHash = mintResponse.transaction_hash
+        ticket.qrCodeData = qrCodeDataString
+        ticket.checkInStatus = 'NOT_CHECKED_IN'
+
+        // ✅ FIX: Only set qrCodeSecret if we have it
+        if (qrCodeSecret) {
+          ticket.qrCodeSecret = qrCodeSecret
+        }
+
+        await ticket.save()
+        updatedTickets.push(ticket)
+
+        console.log(
+          `✅ Successfully processed ticket ${ticket.id}, tokenId: ${mintResponse.token_id}`
+        )
+      } catch (ticketError) {
+        console.error(`❌ Error processing ticket ${ticket.id}:`, ticketError)
+        // Mark ticket as failed
+        ticket.status = 'MINT_FAILED'
+        await ticket.save()
+      }
+    }
+
+    // ✅ FIX: Properly update availability - CRITICAL FIX
+    if (updatedTickets.length > 0) {
+      const ticketType = await TicketType.findById(purchase.ticketTypeId)
+      if (ticketType) {
+        // Calculate REAL availability from database state
+        const [soldCount, reservedCount] = await Promise.all([
+          Ticket.countDocuments({
+            ticketTypeId: purchase.ticketTypeId,
+            status: 'MINTED'
+          }),
+          Ticket.countDocuments({
+            ticketTypeId: purchase.ticketTypeId,
+            status: { $in: ['PENDING_PAYMENT', 'PAID', 'MINTING'] },
+            expiryTime: { $gt: new Date() }
+          })
+        ])
+
+        const correctAvailability = Math.max(
+          0,
+          ticketType.totalQuantity - soldCount - reservedCount
+        )
+
+        // Only update if different
+        if (ticketType.availableQuantity !== correctAvailability) {
+          console.log(
+            `🔄 Updating availability: ${ticketType.availableQuantity} -> ${correctAvailability}`
+          )
+
+          ticketType.availableQuantity = correctAvailability
+          await ticketType.save()
+
+          console.log(
+            `✅ TicketType ${ticketType.id} availability updated to ${correctAvailability}`
+          )
+        } else {
+          console.log(
+            `✅ TicketType availability already correct: ${correctAvailability}`
+          )
+        }
+      }
+    }
 
     console.log(
-      `TicketService: Payment confirmed for ${updatedTickets.length} tickets`
+      `✅ Successfully processed ${updatedTickets.length}/${relatedTickets.length} tickets`
     )
 
-    // Return the first ticket (main ticket)
     callback(null, {
       ticket: ticketDocumentToGrpcTicket(updatedTickets[0]),
-      tickets: updatedTickets.map(t => ticketDocumentToGrpcTicket(t)) // ✅ ADD: Return all tickets
+      tickets: updatedTickets.map(t => ticketDocumentToGrpcTicket(t))
     })
   } catch (error) {
-    console.error('TicketService: ConfirmPaymentAndRequestMint error:', error)
+    console.error('ConfirmPaymentAndRequestMint error:', error)
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to confirm payment and request mint.'
     })
   }
+}
+
+function createSimpleMetadata (event, ticketType, ticket) {
+  const shortEventName =
+    event.name.length > 40 ? event.name.substring(0, 40) + '...' : event.name
+
+  // ✅ FIX: Use simpler metadata like old contract
+  const metadata = {
+    name: `Ticket: ${ticketType.name} - Event: ${shortEventName}`,
+    description: `Ticket for event "${shortEventName}". Type: ${ticketType.name}. Session ID (on chain): ${ticketType.contractSessionId}.`,
+    image: event.banner_url_cid
+      ? `ipfs://${event.banner_url_cid}` // Keep ipfs:// since it worked in old contract
+      : `https://via.placeholder.com/400x400/667eea/ffffff?text=Event+Ticket`,
+    external_url: `https://yourplatform.com/events/${event.id}`,
+    attributes: [
+      {
+        trait_type: 'Event Name',
+        value: shortEventName
+      },
+      {
+        trait_type: 'Ticket Type',
+        value: ticketType.name
+      },
+      {
+        trait_type: 'Event Blockchain ID',
+        value: ticketType.blockchainEventId || 'unknown'
+      },
+      {
+        trait_type: 'Session On Chain',
+        value: ticketType.contractSessionId || 'unknown'
+      },
+      {
+        trait_type: 'Price (WEI)',
+        value: ticketType.priceWei
+      }
+    ]
+  }
+
+  // Add seat info if available
+  if (ticket.seatInfo) {
+    metadata.attributes.push({
+      trait_type: 'Seat',
+      value: `${String.fromCharCode(65 + parseInt(ticket.seatInfo.row))}${
+        parseInt(ticket.seatInfo.seat) + 1
+      }`
+    })
+  }
+
+  console.log('✅ Generated metadata:', {
+    name: metadata.name,
+    image: metadata.image,
+    attributeCount: metadata.attributes.length
+  })
+
+  return metadata
 }
 
 async function GenerateQRCode (call, callback) {
@@ -390,6 +605,13 @@ async function GenerateQRCode (call, callback) {
   console.log(`TicketService: GenerateQRCode called for ticket: ${ticket_id}`)
 
   try {
+    if (!mongoose.Types.ObjectId.isValid(ticket_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid ticket ID format'
+      })
+    }
+
     // Tìm ticket
     const ticket = await Ticket.findById(ticket_id)
     if (!ticket) {
@@ -399,34 +621,79 @@ async function GenerateQRCode (call, callback) {
       })
     }
 
-    // Kiểm tra ticket status
+    // ✅ FIX: Allow QR generation for MINTED tickets
     if (ticket.status !== TICKET_STATUS_ENUM[4]) {
       // MINTED
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
-        message: 'Ticket must be minted before generating QR code'
+        message: `Cannot generate QR code for ticket with status: ${ticket.status}. Ticket must be MINTED.`
       })
     }
 
-    // Tạo QR code nếu chưa có
-    if (!ticket.qrCodeData) {
-      const qrCodeInfo = generateQRCodeData({
+    // ✅ FIX: Generate QR code if not exists, or regenerate if requested
+    let needsUpdate = false
+
+    if (!ticket.qrCodeData || !ticket.qrCodeSecret) {
+      console.log(`🔄 Generating new QR code for ticket ${ticket.id}...`)
+
+      const { qrCodeData, qrCodeSecret } = generateQRCodeData({
         ticketId: ticket.id,
         eventId: ticket.eventId,
         ownerAddress: ticket.ownerAddress
       })
 
-      const expiryTime = new Date()
-      expiryTime.setFullYear(expiryTime.getFullYear() + 1)
-
-      ticket.qrCodeData = qrCodeInfo.qrCodeData
-      ticket.qrCodeSecret = qrCodeInfo.qrCodeSecret
-      ticket.expiryTime = expiryTime
-
-      await ticket.save()
+      ticket.qrCodeData = qrCodeData
+      ticket.qrCodeSecret = qrCodeSecret
+      needsUpdate = true
     }
 
-    // Tạo QR code image
+    // ✅ FIX: Set expiry time if not set
+    if (!ticket.expiryTime) {
+      try {
+        const ticketType = await TicketType.findById(ticket.ticketTypeId)
+        if (ticketType) {
+          const eventResponse = await new Promise((resolve, reject) => {
+            eventServiceClient.GetEvent(
+              {
+                event_id: ticketType.eventId
+              },
+              { deadline: new Date(Date.now() + 5000) },
+              (err, res) => {
+                if (err) reject(err)
+                else resolve(res)
+              }
+            )
+          })
+
+          if (eventResponse?.event?.sessions) {
+            const targetSession = eventResponse.event.sessions.find(
+              s => s.id === ticketType.sessionId
+            )
+            if (targetSession) {
+              // Set expiry to 24 hours after event end time
+              const eventEndTime = new Date(targetSession.end_time * 1000)
+              ticket.expiryTime = new Date(
+                eventEndTime.getTime() + 24 * 60 * 60 * 1000
+              )
+              needsUpdate = true
+            }
+          }
+        }
+      } catch (expiryError) {
+        console.warn('⚠️ Could not set ticket expiry time:', expiryError)
+        // Set default expiry to 30 days from now
+        ticket.expiryTime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        needsUpdate = true
+      }
+    }
+
+    // Save updates if needed
+    if (needsUpdate) {
+      await ticket.save()
+      console.log(`✅ Ticket ${ticket.id} updated with QR code and expiry`)
+    }
+
+    // ✅ FIX: Generate QR code image
     const qrCodeImageBase64 = await generateQRCodeImage(ticket.qrCodeData)
 
     callback(null, {
@@ -755,101 +1022,46 @@ async function GetTicketMetadata (call, callback) {
   const { ticket_id } = call.request
 
   try {
-    // Parse ticket_id to get purchase info
-    const [purchaseId, ticketIndex] = ticket_id.split('_')
+    console.log(
+      `TicketService: GetTicketMetadata called for ticket: ${ticket_id}`
+    )
 
-    const purchase = await Purchase.findOne({ purchaseId })
-    if (!purchase) {
+    const ticket = await Ticket.findById(ticket_id)
+    if (!ticket) {
       return callback({
         code: grpc.status.NOT_FOUND,
-        message: 'Purchase not found'
+        message: 'Ticket not found.'
       })
     }
 
-    const ticketType = await TicketType.findById(purchase.ticketTypeId)
-    if (!ticketType) {
+    if (!ticket.tokenUriCid) {
       return callback({
         code: grpc.status.NOT_FOUND,
-        message: 'Ticket type not found'
+        message: 'Ticket metadata not yet generated.'
       })
     }
 
-    // ✅ FIX: Get event details from event service
-    const eventResponse = await new Promise((resolve, reject) => {
-      eventServiceClient.GetEvent(
-        { event_id: ticketType.eventId },
-        { deadline: new Date(Date.now() + 5000) },
-        (err, res) => {
-          if (err) {
-            console.error('Error getting event details:', err)
-            reject(new Error('Failed to get event details'))
-          } else {
-            resolve(res)
-          }
-        }
-      )
+    // Convert IPFS URI to HTTP gateway URL for easier access
+    const metadataUrl = ticket.tokenUriCid.replace(
+      'ipfs://',
+      'https://gateway.pinata.cloud/ipfs/'
+    )
+
+    callback(null, {
+      metadata: JSON.stringify({
+        ticket_id: ticket.id,
+        token_uri_cid: ticket.tokenUriCid,
+        metadata_url: metadataUrl,
+        token_id: ticket.tokenId,
+        status: ticket.status,
+        owner_address: ticket.ownerAddress
+      })
     })
-
-    const event = eventResponse.event
-    if (!event) {
-      return callback({
-        code: grpc.status.NOT_FOUND,
-        message: 'Event not found'
-      })
-    }
-
-    const metadata = {
-      name: `${event.name} - ${ticketType.name}`,
-      description: `Event ticket for ${event.name}`,
-      image: event.banner_url_cid
-        ? `${process.env.IPFS_GATEWAY || 'https://gateway.pinata.cloud/ipfs/'}${
-            event.banner_url_cid
-          }`
-        : 'https://via.placeholder.com/300x300',
-      attributes: [
-        {
-          trait_type: 'Event',
-          value: event.name
-        },
-        {
-          trait_type: 'Ticket Type',
-          value: ticketType.name
-        },
-        {
-          trait_type: 'Price',
-          value: `${ethers.formatEther(ticketType.priceWei)} ETH`
-        },
-        {
-          trait_type: 'Event ID',
-          value: event.id
-        },
-        {
-          trait_type: 'Session ID',
-          value: ticketType.sessionId
-        }
-      ]
-    }
-
-    // Add seat info if available
-    if (
-      purchase.selectedSeats &&
-      purchase.selectedSeats.length > parseInt(ticketIndex || '0')
-    ) {
-      const seatKey = purchase.selectedSeats[parseInt(ticketIndex || '0')]
-      if (seatKey) {
-        metadata.attributes.push({
-          trait_type: 'Seat',
-          value: seatKey
-        })
-      }
-    }
-
-    callback(null, { metadata: JSON.stringify(metadata) })
   } catch (error) {
-    console.error('GetTicketMetadata error:', error)
+    console.error('TicketService: GetTicketMetadata error:', error)
     callback({
       code: grpc.status.INTERNAL,
-      message: 'Failed to get ticket metadata'
+      message: error.message || 'Failed to get ticket metadata.'
     })
   }
 }

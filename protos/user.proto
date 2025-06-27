@@ -41,6 +41,13 @@ service UserService {
     //     body: "*"
     // };
     }
+
+    rpc UpdateUser (UpdateUserRequest) returns (UserResponse) {
+        option (google.api.http) = {
+            put: "/v1/users/{user_id}"
+            body: "*"
+        };
+    }
 }
 
 message UserRequestById {
@@ -77,4 +84,12 @@ message UserRequestByEmail {
 }
 message UserRequestByWallet {
     string wallet_address = 1;
+}
+
+message UpdateUserRequest {
+    string user_id = 1;
+    string full_name = 2;
+    string phone_number = 3;
+    string wallet_address = 4;
+    string avatar_cid = 5;
 }

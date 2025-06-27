@@ -1,5 +1,6 @@
 const User = require('../models/User')
 const { comparePassword } = require('../utils/passwordUtils')
+const mongoose = require('mongoose')
 
 // Hàm chuyển đổi user model sang UserResponse proto
 function userToUserResponse (userDocument) {
@@ -21,6 +22,63 @@ function userToUserResponse (userDocument) {
       ? userObj.updatedAt.toISOString()
       : new Date().toISOString()
     // Lưu ý: Password không được trả về
+  }
+}
+
+async function UpdateUser (call, callback) {
+  const { user_id, full_name, phone_number, wallet_address, avatar_cid } =
+    call.request
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(user_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid user ID format.'
+      })
+    }
+
+    const updateData = {}
+    if (full_name !== undefined) updateData.fullName = full_name
+    if (phone_number !== undefined) updateData.phoneNumber = phone_number
+    if (wallet_address !== undefined)
+      updateData.walletAddress =
+        wallet_address === '' ? undefined : wallet_address
+    if (avatar_cid !== undefined) updateData.avatarCid = avatar_cid
+
+    // Check wallet address uniqueness if provided
+    if (updateData.walletAddress) {
+      const existingUser = await User.findOne({
+        walletAddress: updateData.walletAddress,
+        _id: { $ne: user_id }
+      })
+      if (existingUser) {
+        return callback({
+          code: grpc.status.ALREADY_EXISTS,
+          message: 'Wallet address already in use by another user'
+        })
+      }
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      user_id,
+      { $set: updateData },
+      { new: true }
+    )
+
+    if (!updatedUser) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'User not found'
+      })
+    }
+
+    callback(null, userToUserResponse(updatedUser))
+  } catch (error) {
+    console.error('UpdateUser Error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Error updating user'
+    })
   }
 }
 
@@ -221,6 +279,7 @@ const grpc = require('@grpc/grpc-js')
 module.exports = {
   GetUserById,
   GetUserByEmail,
+  UpdateUser,
   GetUserByWalletAddress,
   CreateUser,
   AuthenticateUser

@@ -265,7 +265,7 @@ async function MintTicket (call, callback) {
   const {
     buyer_address,
     token_uri_cid,
-    blockchain_ticket_type_id, // ✅ CHANGE: Use ticket type ID instead of event ID
+    blockchain_ticket_type_id,
     session_id_for_contract
   } = call.request
 
@@ -274,57 +274,75 @@ async function MintTicket (call, callback) {
   )
 
   try {
-    // ✅ FIX: Validate ticket type exists on contract
-    const ticketTypeIdBN = BigInt(blockchain_ticket_type_id)
-    const ticketTypeInfo = await eventTicketNFTContract.ticketTypeInfo(
-      ticketTypeIdBN
-    )
-
-    if (!ticketTypeInfo || !ticketTypeInfo.exists) {
-      throw new Error(
-        `TicketType ${blockchain_ticket_type_id} not found on blockchain`
-      )
+    // Validate inputs
+    if (!buyer_address || !token_uri_cid || !blockchain_ticket_type_id) {
+      throw new Error('Missing required parameters for minting')
     }
 
-    const sessionIdBN = BigInt(session_id_for_contract)
+    const ticketTypeIdBN = BigInt(blockchain_ticket_type_id)
 
-    // ✅ FIX: Use batchMint with ticketTypeIds
-    const uris = [token_uri_cid]
-    const ticketTypeIds = [ticketTypeIdBN]
-    const sessionIds = [sessionIdBN]
+    // Validate ticket type exists
+    try {
+      const ticketTypeInfo = await eventTicketNFTContract.ticketTypeInfo(
+        ticketTypeIdBN
+      )
+      if (!ticketTypeInfo || !ticketTypeInfo.exists) {
+        throw new Error(
+          `Ticket type ${blockchain_ticket_type_id} not found on contract`
+        )
+      }
+      console.log('✅ Ticket type validated on contract:', {
+        ticketTypeId: blockchain_ticket_type_id,
+        price: ticketTypeInfo.price.toString(),
+        eventId: ticketTypeInfo.eventId.toString(),
+        exists: ticketTypeInfo.exists
+      })
+    } catch (contractError) {
+      console.error('❌ Ticket type validation failed:', contractError)
+      throw new Error(`Invalid ticket type ID: ${blockchain_ticket_type_id}`)
+    }
 
-    console.log(
-      `Calling contract.batchMint(${buyer_address}, [${uris[0]}], [${ticketTypeIds[0]}], [${sessionIds[0]}])`
-    )
+    console.log('🏗️ Minting NFT with params:', {
+      buyer_address,
+      token_uri_cid,
+      ticketTypeId: blockchain_ticket_type_id,
+      sessionId: session_id_for_contract || '1'
+    })
 
     const txOptions = await prepareGasOptions()
 
-    // ✅ FIX: Call batchMint with ticketTypeIds
-    const tx = await eventTicketNFTContract.batchMint(
-      buyer_address,
-      uris,
-      ticketTypeIds,
-      sessionIds,
+    // ✅ FIX: Use mintTicket (single mint like old contract)
+    const tx = await eventTicketNFTContract.mintTicket(
+      buyer_address, // address to
+      token_uri_cid, // string uri
+      ticketTypeIdBN, // uint256 ticketTypeId
+      BigInt(session_id_for_contract || '1'), // uint256 sessionId
       txOptions
     )
 
-    console.log(`Transaction sent for batchMint, hash: ${tx.hash}`)
-    const receipt = await waitForTransaction(tx)
+    console.log(`Transaction sent for mintTicket, hash: ${tx.hash}`)
+    const receipt = await waitForTransaction(tx, 2)
 
-    // Parse logs to get tokenId
+    // Parse logs for TicketMinted event
     let mintedTokenId = '0'
+
     for (const log of receipt.logs || []) {
       try {
         const parsedLog = eventTicketNFTContract.interface.parseLog(log)
+
         if (parsedLog && parsedLog.name === 'TicketMinted') {
           mintedTokenId = parsedLog.args.tokenId.toString()
-          console.log(
-            `Found TicketMinted event: tokenId=${mintedTokenId}, eventId=${parsedLog.args.eventId.toString()}, ticketTypeId=${parsedLog.args.ticketTypeId.toString()}`
-          )
+
+          console.log('✅ Found TicketMinted event:', {
+            tokenId: mintedTokenId,
+            eventId: parsedLog.args.eventId.toString(),
+            ticketTypeId: parsedLog.args.ticketTypeId.toString(),
+            owner: parsedLog.args.owner
+          })
           break
         }
-      } catch (e) {
-        // Ignore logs that aren't from our contract
+      } catch (parseError) {
+        console.log('⚠️ Could not parse log:', parseError.message)
       }
     }
 
@@ -334,17 +352,54 @@ async function MintTicket (call, callback) {
       )
     }
 
+    // Verify token URI was set correctly
+    try {
+      const setTokenURI = await eventTicketNFTContract.tokenURI(mintedTokenId)
+      console.log('✅ Token URI verified on contract:', {
+        tokenId: mintedTokenId,
+        uri: setTokenURI,
+        expectedUri: token_uri_cid
+      })
+
+      // Verify owner
+      const owner = await eventTicketNFTContract.ownerOf(mintedTokenId)
+      console.log('✅ Token owner verified:', {
+        tokenId: mintedTokenId,
+        owner: owner,
+        expectedOwner: buyer_address
+      })
+    } catch (verifyError) {
+      console.warn('⚠️ Could not verify token details:', verifyError.message)
+    }
+
+    console.log(`✅ Successfully minted NFT with tokenId: ${mintedTokenId}`)
+
     callback(null, {
       success: true,
       token_id: mintedTokenId,
       transaction_hash: receipt.hash,
-      owner_address: buyer_address
+      owner_address: buyer_address,
+      gas_used: receipt.gasUsed?.toString() || '0'
     })
   } catch (error) {
-    console.error('MintTicket Error:', error)
+    console.error('❌ MintTicket Error:', error)
+
+    let errorMessage = error.message || 'Failed to mint ticket'
+    let statusCode = grpc.status.INTERNAL
+
+    if (error.message?.includes('Invalid ticket type')) {
+      statusCode = grpc.status.INVALID_ARGUMENT
+    } else if (error.message?.includes('insufficient funds')) {
+      statusCode = grpc.status.FAILED_PRECONDITION
+      errorMessage = 'Insufficient funds for minting'
+    } else if (error.message?.includes('execution reverted')) {
+      statusCode = grpc.status.FAILED_PRECONDITION
+      errorMessage = `Contract execution failed: ${error.message}`
+    }
+
     callback({
-      code: grpc.status.INTERNAL,
-      message: error.message || 'Failed to mint ticket'
+      code: statusCode,
+      message: errorMessage
     })
   }
 }

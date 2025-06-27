@@ -14,6 +14,7 @@ const HealthImplementation = healthCheck.HealthImplementation
 const ticketServiceHandlers = require('./handlers/ticketServiceHandlers')
 const ticketTypeServiceHandlers = require('./handlers/ticketTypeServiceHandlers')
 const settlementHandlers = require('./handlers/settlementHandlers')
+const { cleanupExpiredReservations } = require('./utils/cleanupUtils')
 
 const SERVICE_TYPE = process.env.SERVICE_TYPE
 const PORT = process.env.PORT || 50055
@@ -98,6 +99,14 @@ async function main () {
     console.error(`MongoDB connection error for ${SERVICE_NAME}:`, err)
     process.exit(1)
   }
+
+  // try {
+  //   console.log('Running initial cleanup...')
+  //   await cleanupExpiredReservations()
+  // } catch (error) {
+  //   console.error('❌ Failed to start ticket service:', error)
+  //   process.exit(1)
+  // }
 
   const server = new grpc.Server()
   server.addService(TicketServiceDefinition, ticketServiceHandlers)

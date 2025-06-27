@@ -20,7 +20,7 @@ contract EventTicketNFT is ERC721URIStorage, Ownable {
         string name;
         bool exists;
     }
-    mapping(uint256 => TicketTypeInfo) public ticketTypeInfo; // ticketTypeId => info
+    mapping(uint256 => TicketTypeInfo) public ticketTypeInfo;
 
     /* ───── Ticket-level data ───── */
     struct TicketData {
@@ -86,10 +86,37 @@ contract EventTicketNFT is ERC721URIStorage, Ownable {
         return ticketTypeId;
     }
 
-    /* ───── Public: buy tickets ───── */
+    /* ───── Owner: simplified mint like old contract ───── */
+    function mintTicket(
+        address to,
+        string calldata uri,
+        uint256 ticketTypeId,
+        uint256 sessionId
+    ) external onlyOwner returns (uint256) {
+        TicketTypeInfo storage tt = ticketTypeInfo[ticketTypeId];
+        require(tt.exists, "TicketType not exists");
+
+        uint256 tokenId = nextTokenId++;
+        
+        // ✅ FIX: Use the same pattern as old contract
+        _safeMint(to, tokenId);
+        _setTokenURI(tokenId, uri);
+
+        tickets[tokenId] = TicketData({
+            eventId: tt.eventId,
+            ticketTypeId: ticketTypeId,
+            sessionId: sessionId,
+            price: tt.price
+        });
+        
+        emit TicketMinted(tokenId, tt.eventId, ticketTypeId, sessionId, to, tt.price);
+        return tokenId;
+    }
+
+    /* ───── Public: buy tickets (simplified) ───── */
     function buyTickets(
         string[] calldata uris,
-        uint256[] calldata ticketTypeIds, // ✅ Changed from eventIds to ticketTypeIds
+        uint256[] calldata ticketTypeIds,
         uint256[] calldata sessionIds
     ) external payable {
         uint256 n = uris.length;
@@ -126,33 +153,15 @@ contract EventTicketNFT is ERC721URIStorage, Ownable {
         payable(owner()).transfer(msg.value);
     }
 
-    /* ───── Owner: batch-mint tickets ───── */
-    function batchMint(
-        address to,
-        string[] calldata uris,
-        uint256[] calldata ticketTypeIds,
-        uint256[] calldata sessionIds
-    ) external onlyOwner {
-        uint256 n = uris.length;
-        require(n == ticketTypeIds.length && n == sessionIds.length, "Array mismatch");
+    // ✅ FIX: Override supportsInterface properly
+    function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
+        return super.supportsInterface(interfaceId);
+    }
 
-        for (uint256 i = 0; i < n; ++i) {
-            TicketTypeInfo storage tt = ticketTypeInfo[ticketTypeIds[i]];
-            require(tt.exists, "TicketType not exists");
-
-            uint256 tokenId = nextTokenId++;
-            _safeMint(to, tokenId);
-            _setTokenURI(tokenId, uris[i]);
-
-            tickets[tokenId] = TicketData({
-                eventId: tt.eventId,
-                ticketTypeId: ticketTypeIds[i],
-                sessionId: sessionIds[i],
-                price: tt.price
-            });
-            
-            emit TicketMinted(tokenId, tt.eventId, ticketTypeIds[i], sessionIds[i], to, tt.price);
-        }
+    // ✅ FIX: Override tokenURI to ensure it works correctly
+    function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
+        require(_ownerOf(tokenId) != address(0), "ERC721: URI query for nonexistent token");
+        return super.tokenURI(tokenId);
     }
 
     /* ───── Views ───── */
@@ -167,7 +176,6 @@ contract EventTicketNFT is ERC721URIStorage, Ownable {
             }
         }
         
-        // Resize array
         uint256[] memory finalResult = new uint256[](count);
         for (uint256 i = 0; i < count; i++) {
             finalResult[i] = result[i];
