@@ -18,20 +18,141 @@ function seatMapDocumentToGrpcSeatMap (doc) {
       shape: jsonDoc.stageConfig.shape || ''
     },
     sections: jsonDoc.sections
-      ? jsonDoc.sections.map(s => ({
-          id: s.id,
-          name: s.name,
-          type: s.type,
-          position: s.position,
-          dimensions: s.dimensions,
-          rows: s.rows,
-          seats_per_row: s.seats_per_row,
-          color: s.color || '',
-          price_category_id: s.price_category_id || '',
-          price_description: s.price_description || '',
-          rows_config_input: s.rows_config_input || '' // ✅ ADD
-        }))
+      ? jsonDoc.sections.map(s => {
+          // ✅ FIX: Generate correct rows_config_input
+          let rowsConfigInput = s.rows_config_input || ''
+
+          if (!rowsConfigInput && s.rows && s.seats_per_row) {
+            // Generate: "1:seats_per_row,1:seats_per_row,..." for each row
+            const configs = []
+            for (let i = 1; i <= s.rows; i++) {
+              configs.push(`1:${s.seats_per_row}`) // All rows start from column 1
+            }
+            rowsConfigInput = configs.join(',')
+          }
+
+          return {
+            id: s.id,
+            name: s.name,
+            type: s.type,
+            position: s.position,
+            dimensions: s.dimensions,
+            rows: s.rows,
+            seats_per_row: s.seats_per_row,
+            color: s.color || '',
+            price_category_id: s.price_category_id || '',
+            price_description: s.price_description || '',
+            rows_config_input: rowsConfigInput
+          }
+        })
       : []
+  }
+}
+
+async function CreateSeatMap (call, callback) {
+  const { event_id, stage_config, sections } = call.request
+  console.log(`SeatMapService: CreateSeatMap called for event_id: ${event_id}`)
+
+  try {
+    // ... existing validation code ...
+
+    // ✅ FIX: Transform sections với rows_config_input generation
+    const mongooseSections = sections.map(s_in => {
+      // Generate rows_config_input if not provided
+      let rowsConfigInput = s_in.rows_config_input || ''
+
+      if (!rowsConfigInput && s_in.rows && s_in.seats_per_row) {
+        const configs = []
+        for (let i = 1; i <= s_in.rows; i++) {
+          configs.push(`1:${s_in.seats_per_row}`) // All rows start from column 1
+        }
+        rowsConfigInput = configs.join(',')
+      }
+
+      return {
+        name: s_in.name,
+        type: s_in.type,
+        position: s_in.position,
+        dimensions: s_in.dimensions,
+        rows: s_in.rows || 0,
+        seats_per_row: s_in.seats_per_row || 0,
+        color: s_in.color || '#87CEEB',
+        price_category_id: s_in.price_category_id || '',
+        price_description: s_in.price_description || '',
+        rows_config_input: rowsConfigInput
+      }
+    })
+
+    const newSeatMap = new SeatMap({
+      eventId: event_id,
+      stageConfig: stage_config,
+      sections: mongooseSections
+    })
+
+    const savedSeatMap = await newSeatMap.save()
+
+    console.log(
+      'SeatMapService: SeatMap created with sections:',
+      savedSeatMap.sections.map(s => ({
+        name: s.name,
+        rows_config_input: s.rows_config_input,
+        rows: s.rows,
+        seats_per_row: s.seats_per_row
+      }))
+    )
+
+    callback(null, { seat_map: seatMapDocumentToGrpcSeatMap(savedSeatMap) })
+  } catch (error) {
+    // ... existing error handling ...
+  }
+}
+
+async function UpdateSeatMap (call, callback) {
+  const { seat_map_id, event_id_to_verify, stage_config, sections } =
+    call.request
+  console.log(
+    `SeatMapService: UpdateSeatMap called for seat_map_id: ${seat_map_id}`
+  )
+
+  try {
+    // ... existing validation code ...
+
+    const updateData = {
+      stageConfig: stage_config,
+      sections: sections.map(s_in => {
+        // Generate rows_config_input if not provided
+        let rowsConfigInput = s_in.rows_config_input || ''
+
+        if (!rowsConfigInput && s_in.rows && s_in.seats_per_row) {
+          const configs = []
+          for (let i = 1; i <= s_in.rows; i++) {
+            configs.push(`1:${s_in.seats_per_row}`) // All rows start from column 1
+          }
+          rowsConfigInput = configs.join(',')
+        }
+
+        return {
+          _id:
+            s_in.id && mongoose.Types.ObjectId.isValid(s_in.id)
+              ? s_in.id
+              : new mongoose.Types.ObjectId(),
+          name: s_in.name,
+          type: s_in.type,
+          position: s_in.position,
+          dimensions: s_in.dimensions,
+          rows: s_in.rows,
+          seats_per_row: s_in.seats_per_row,
+          color: s_in.color,
+          price_category_id: s_in.price_category_id,
+          price_description: s_in.price_description,
+          rows_config_input: rowsConfigInput
+        }
+      })
+    }
+
+    // ... rest of existing update logic ...
+  } catch (error) {
+    // ... existing error handling ...
   }
 }
 
@@ -90,19 +211,32 @@ async function CreateSeatMap (call, callback) {
       }
     }
 
-    // ✅ FIX: Transform sections với rows_config_input
-    const mongooseSections = sections.map(s_in => ({
-      name: s_in.name,
-      type: s_in.type,
-      position: s_in.position,
-      dimensions: s_in.dimensions,
-      rows: s_in.rows || 0,
-      seats_per_row: s_in.seats_per_row || 0,
-      color: s_in.color || '#87CEEB',
-      price_category_id: s_in.price_category_id || '',
-      price_description: s_in.price_description || '',
-      rows_config_input: s_in.rows_config_input || '' // ✅ ADD: Field mới
-    }))
+    // ✅ FIX: Transform sections với rows_config_input generation
+    const mongooseSections = sections.map(s_in => {
+      // Generate rows_config_input if not provided
+      let rowsConfigInput = s_in.rows_config_input || ''
+
+      if (!rowsConfigInput && s_in.rows && s_in.seats_per_row) {
+        const configs = []
+        for (let i = 1; i <= s_in.rows; i++) {
+          configs.push(`1:${s_in.seats_per_row}`) // All rows start from column 1
+        }
+        rowsConfigInput = configs.join(',')
+      }
+
+      return {
+        name: s_in.name,
+        type: s_in.type,
+        position: s_in.position,
+        dimensions: s_in.dimensions,
+        rows: s_in.rows || 0,
+        seats_per_row: s_in.seats_per_row || 0,
+        color: s_in.color || '#87CEEB',
+        price_category_id: s_in.price_category_id || '',
+        price_description: s_in.price_description || '',
+        rows_config_input: rowsConfigInput
+      }
+    })
 
     const newSeatMap = new SeatMap({
       eventId: event_id,
@@ -111,9 +245,17 @@ async function CreateSeatMap (call, callback) {
     })
 
     const savedSeatMap = await newSeatMap.save()
+
     console.log(
-      `SeatMapService: SeatMap created for event ${event_id} with ID: ${savedSeatMap.id}`
+      'SeatMapService: SeatMap created with sections:',
+      savedSeatMap.sections.map(s => ({
+        name: s.name,
+        rows_config_input: s.rows_config_input,
+        rows: s.rows,
+        seats_per_row: s.seats_per_row
+      }))
     )
+
     callback(null, { seat_map: seatMapDocumentToGrpcSeatMap(savedSeatMap) })
   } catch (error) {
     console.error('SeatMapService: CreateSeatMap error:', error)
@@ -208,23 +350,36 @@ async function UpdateSeatMap (call, callback) {
     }
 
     const updateData = {
-      stageConfig: stage_config, // Đổi tên cho khớp Mongoose
-      sections: sections.map(s_in => ({
-        // Client gửi ID của section nếu muốn giữ lại section cũ, nếu không thì là section mới
-        _id:
-          s_in.id && mongoose.Types.ObjectId.isValid(s_in.id)
-            ? s_in.id
-            : new mongoose.Types.ObjectId(), // Giữ id cũ hoặc tạo id mới
-        name: s_in.name,
-        type: s_in.type,
-        position: s_in.position,
-        dimensions: s_in.dimensions,
-        rows: s_in.rows,
-        seats_per_row: s_in.seats_per_row,
-        color: s_in.color,
-        price_category_id: s_in.price_category_id,
-        price_description: s_in.price_description
-      }))
+      stageConfig: stage_config,
+      sections: sections.map(s_in => {
+        // Generate rows_config_input if not provided
+        let rowsConfigInput = s_in.rows_config_input || ''
+
+        if (!rowsConfigInput && s_in.rows && s_in.seats_per_row) {
+          const configs = []
+          for (let i = 1; i <= s_in.rows; i++) {
+            configs.push(`1:${s_in.seats_per_row}`) // All rows start from column 1
+          }
+          rowsConfigInput = configs.join(',')
+        }
+
+        return {
+          _id:
+            s_in.id && mongoose.Types.ObjectId.isValid(s_in.id)
+              ? s_in.id
+              : new mongoose.Types.ObjectId(),
+          name: s_in.name,
+          type: s_in.type,
+          position: s_in.position,
+          dimensions: s_in.dimensions,
+          rows: s_in.rows,
+          seats_per_row: s_in.seats_per_row,
+          color: s_in.color,
+          price_category_id: s_in.price_category_id,
+          price_description: s_in.price_description,
+          rows_config_input: rowsConfigInput
+        }
+      })
     }
 
     // (Tùy chọn) Xác minh event_id_to_verify nếu được cung cấp

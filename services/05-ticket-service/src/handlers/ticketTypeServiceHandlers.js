@@ -45,7 +45,7 @@ async function CreateTicketType (call, callback) {
   })
 
   try {
-    // ✅ FIX: Better validation với specific error messages
+    // ✅ VALIDATE REQUIRED FIELDS
     if (!event_id || typeof event_id !== 'string' || event_id.trim() === '') {
       console.error('❌ Invalid event_id:', { event_id, type: typeof event_id })
       return callback({
@@ -85,7 +85,7 @@ async function CreateTicketType (call, callback) {
       })
     }
 
-    // 1. Gọi event-service để lấy thông tin Event và Session
+    // ✅ FETCH EVENT AND SESSION INFO FOR VALIDATION ONLY
     console.log(
       `TicketTypeService: Fetching event details from EventService for event ID: ${event_id}`
     )
@@ -115,34 +115,8 @@ async function CreateTicketType (call, callback) {
 
     const parentEvent = eventResponse.event
     console.log(`🔍 Parent event sessions:`, parentEvent.sessions)
-    console.log(
-      `🔍 Parent event blockchain_event_id:`,
-      parentEvent.blockchain_event_id
-    ) // ✅ ADD: Debug log
 
-    // ✅ FIX: Validate that parent event has blockchain_event_id
-    if (
-      !parentEvent.blockchain_event_id ||
-      parentEvent.blockchain_event_id === '0'
-    ) {
-      console.error(`❌ Parent event missing blockchain_event_id:`, {
-        eventId: event_id,
-        blockchainEventId: parentEvent.blockchain_event_id,
-        status: parentEvent.status
-      })
-      return callback({
-        code: grpc.status.FAILED_PRECONDITION,
-        message: `Parent event "${event_id}" must be published to blockchain first. Current blockchain_event_id: "${
-          parentEvent.blockchain_event_id || 'NONE'
-        }"`
-      })
-    }
-
-    console.log(
-      `✅ Parent event has valid blockchain_event_id: "${parentEvent.blockchain_event_id}"`
-    )
-
-    // ✅ FIX: Tìm session với ID chính xác
+    // ✅ FIND TARGET SESSION
     const targetSession = parentEvent.sessions.find(s => {
       console.log(
         `🔍 Comparing session: "${s.id}" === "${session_id}"`,
@@ -165,7 +139,7 @@ async function CreateTicketType (call, callback) {
       })
     }
 
-    // ✅ FIX: Validate contract_session_id
+    // ✅ VALIDATE CONTRACT SESSION ID EXISTS
     if (!targetSession.contract_session_id) {
       console.error(`❌ Session missing contract_session_id:`, targetSession)
       return callback({
@@ -179,13 +153,13 @@ async function CreateTicketType (call, callback) {
       `✅ Found session with contract_session_id: "${contractSessionIdFromEvent}"`
     )
 
-    // ✅ FIX: Create TicketType với proper field mapping
+    // ✅ CREATE TICKET TYPE DRAFT (NO BLOCKCHAIN VALIDATION OR AUTO-PUBLISH)
     const newTicketType = new TicketType({
       eventId: event_id,
       sessionId: session_id,
       contractSessionId: contractSessionIdFromEvent,
-      blockchainEventId: parentEvent.blockchain_event_id, // ✅ FIX: Inherit from parent
-      blockchainTicketTypeId: '', // ✅ Will be set when published to blockchain
+      blockchainEventId: '', // ❌ KHÔNG GHI blockchain event id khi tạo draft
+      blockchainTicketTypeId: '', // ❌ KHÔNG GHI blockchain ticket type id khi tạo draft
       name,
       totalQuantity: total_quantity,
       availableQuantity: total_quantity,
@@ -195,55 +169,11 @@ async function CreateTicketType (call, callback) {
     const savedTicketType = await newTicketType.save()
 
     console.log(
-      `✅ TicketType "${name}" created with ID ${savedTicketType.id} for session ${session_id}`
+      `✅ TicketType DRAFT "${name}" created with ID ${savedTicketType.id} for session ${session_id}`
     )
 
-    // ✅ FIX: Debug the blockchain fields before auto-publish check
-    console.log(`🔍 TicketType blockchain fields:`, {
-      id: savedTicketType.id,
-      blockchainEventId: savedTicketType.blockchainEventId,
-      blockchainTicketTypeId: savedTicketType.blockchainTicketTypeId,
-      contractSessionId: savedTicketType.contractSessionId
-    })
-
-    // ✅ FIX: Auto-publish to blockchain if parent event is published
-    if (
-      savedTicketType.blockchainEventId &&
-      savedTicketType.blockchainEventId !== '0'
-    ) {
-      console.log('🔄 Auto-publishing TicketType to blockchain...')
-
-      try {
-        const publishResponse = await new Promise((resolve, reject) => {
-          blockchainServiceClient.RegisterTicketTypeOnBlockchain(
-            {
-              blockchain_event_id: savedTicketType.blockchainEventId,
-              ticket_type_name: savedTicketType.name,
-              price_wei: savedTicketType.priceWei,
-              total_supply: savedTicketType.totalQuantity.toString()
-            },
-            (error, response) => {
-              if (error) reject(error)
-              else resolve(response)
-            }
-          )
-        })
-
-        if (publishResponse.success) {
-          // Update with blockchain ticket type ID
-          savedTicketType.blockchainTicketTypeId =
-            publishResponse.blockchain_ticket_type_id
-          await savedTicketType.save()
-
-          console.log(
-            `✅ TicketType auto-published with blockchain ID: ${publishResponse.blockchain_ticket_type_id}`
-          )
-        }
-      } catch (publishError) {
-        console.error('❌ Auto-publish failed:', publishError)
-        // Don't fail the creation, just log the error
-      }
-    }
+    // ❌ REMOVED: Tất cả logic blockchain validation và auto-publish
+    // Sẽ được xử lý riêng trong PublishTicketType
 
     callback(null, ticketTypeToProto(savedTicketType))
   } catch (error) {
@@ -270,7 +200,7 @@ async function CreateTicketType (call, callback) {
 
     callback({
       code: grpc.status.INTERNAL,
-      message: error.message || 'Failed to create ticket type.'
+      message: error.message || 'Failed to create ticket type draft.'
     })
   }
 }
@@ -499,6 +429,7 @@ async function PublishTicketType (call, callback) {
       })
     }
 
+    // ✅ FETCH TICKET TYPE
     const ticketType = await TicketType.findById(ticket_type_id)
     if (!ticketType) {
       return callback({
@@ -507,61 +438,131 @@ async function PublishTicketType (call, callback) {
       })
     }
 
-    // Check if already published
+    console.log(`🔍 Publishing ticket type:`, {
+      id: ticketType.id,
+      name: ticketType.name,
+      eventId: ticketType.eventId,
+      blockchainTicketTypeId: ticketType.blockchainTicketTypeId
+    })
+
+    // ✅ CHECK IF ALREADY PUBLISHED
     if (
       ticketType.blockchainTicketTypeId &&
-      ticketType.blockchainTicketTypeId !== '0'
+      ticketType.blockchainTicketTypeId !== ''
     ) {
       return callback({
         code: grpc.status.ALREADY_EXISTS,
-        message: 'TicketType is already published to blockchain.'
+        message: `TicketType "${ticketType.name}" is already published to blockchain with ID: ${ticketType.blockchainTicketTypeId}`
       })
     }
 
-    // Check if parent event is published
-    if (!ticketType.blockchainEventId || ticketType.blockchainEventId === '0') {
+    // ✅ NOW FETCH PARENT EVENT TO GET BLOCKCHAIN EVENT ID
+    console.log(
+      `🔍 Fetching parent event to get blockchain_event_id for event: ${ticketType.eventId}`
+    )
+
+    const eventResponse = await new Promise((resolve, reject) => {
+      eventServiceClient.GetEvent(
+        { event_id: ticketType.eventId },
+        { deadline: new Date(Date.now() + 10000) },
+        (err, res) => {
+          if (err) {
+            console.error('❌ EventService.GetEvent error:', err)
+            reject(new Error(`Failed to fetch event: ${err.message}`))
+          } else {
+            resolve(res)
+          }
+        }
+      )
+    })
+
+    if (!eventResponse || !eventResponse.event) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: `Parent event with ID ${ticketType.eventId} not found.`
+      })
+    }
+
+    const parentEvent = eventResponse.event
+
+    // ✅ VALIDATE PARENT EVENT IS PUBLISHED
+    if (
+      !parentEvent.blockchain_event_id ||
+      parentEvent.blockchain_event_id === '0' ||
+      parentEvent.blockchain_event_id === ''
+    ) {
+      console.error(`❌ Parent event not published to blockchain:`, {
+        eventId: ticketType.eventId,
+        blockchainEventId: parentEvent.blockchain_event_id,
+        status: parentEvent.status
+      })
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
-        message: 'Parent event must be published to blockchain first.'
+        message: `Parent event "${
+          ticketType.eventId
+        }" must be published to blockchain first. Current blockchain_event_id: "${
+          parentEvent.blockchain_event_id || 'NONE'
+        }"`
       })
     }
 
-    // Call blockchain service to register ticket type
+    console.log(
+      `✅ Parent event has valid blockchain_event_id: "${parentEvent.blockchain_event_id}"`
+    )
+
+    // ✅ UPDATE TICKET TYPE WITH BLOCKCHAIN EVENT ID
+    ticketType.blockchainEventId = parentEvent.blockchain_event_id
+    await ticketType.save()
+
+    console.log(
+      `✅ Updated ticket type with blockchain_event_id: ${parentEvent.blockchain_event_id}`
+    )
+
+    // ✅ CALL BLOCKCHAIN SERVICE TO REGISTER TICKET TYPE
     const bcResponse = await new Promise((resolve, reject) => {
       blockchainServiceClient.RegisterTicketTypeOnBlockchain(
         {
-          blockchain_event_id: ticketType.blockchainEventId,
+          blockchain_event_id: parentEvent.blockchain_event_id,
           ticket_type_name: ticketType.name,
           price_wei: ticketType.priceWei,
           total_supply: ticketType.totalQuantity.toString()
         },
-        { deadline: new Date(Date.now() + 60000) },
-        (err, response) => {
-          if (err) reject(err)
-          else resolve(response)
+        (error, response) => {
+          if (error) {
+            console.error('❌ Blockchain service error:', error)
+            reject(error)
+          } else {
+            console.log('✅ Blockchain service response:', response)
+            resolve(response)
+          }
         }
       )
     })
 
     if (bcResponse && bcResponse.success) {
-      // Update ticket type with blockchain ID
+      // ✅ UPDATE TICKET TYPE WITH BLOCKCHAIN TICKET TYPE ID
       ticketType.blockchainTicketTypeId = bcResponse.blockchain_ticket_type_id
-      const updatedTicketType = await ticketType.save()
+      await ticketType.save()
 
       console.log(
-        `TicketTypeService: TicketType ${updatedTicketType.id} published. Blockchain TicketType ID: ${updatedTicketType.blockchainTicketTypeId}`
+        `✅ TicketType "${ticketType.name}" published successfully with blockchain ID: ${bcResponse.blockchain_ticket_type_id}`
       )
 
-      callback(null, ticketTypeToProto(updatedTicketType))
+      callback(null, {
+        success: true,
+        message: `TicketType "${ticketType.name}" published successfully`,
+        ticket_type: ticketTypeToProto(ticketType),
+        blockchain_ticket_type_id: bcResponse.blockchain_ticket_type_id,
+        transaction_hash: bcResponse.transaction_hash
+      })
     } else {
       throw new Error(
-        `Failed to register ticket type on blockchain: ${
-          bcResponse?.message || 'Blockchain service error'
-        }`
+        'Blockchain registration failed: ' +
+          (bcResponse?.message || 'Unknown error')
       )
     }
   } catch (error) {
-    console.error('TicketTypeService: PublishTicketType error:', error)
+    console.error('❌ TicketTypeService: PublishTicketType error:', error)
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to publish ticket type.'
@@ -569,6 +570,143 @@ async function PublishTicketType (call, callback) {
   }
 }
 
+// Thêm hàm mới
+async function ListAllTicketTypes (call, callback) {
+  const {
+    page_size = 20,
+    page_token,
+    status_filter,
+    organizer_id,
+    event_id
+  } = call.request
+
+  console.log(`TicketTypeService: ListAllTicketTypes called with filters:`, {
+    page_size,
+    page_token,
+    status_filter,
+    organizer_id,
+    event_id
+  })
+
+  try {
+    // Build query filter
+    const query = {}
+
+    if (event_id) {
+      if (!mongoose.Types.ObjectId.isValid(event_id)) {
+        return callback({
+          code: grpc.status.INVALID_ARGUMENT,
+          message: 'Invalid event_id format.'
+        })
+      }
+      query.eventId = event_id
+    }
+
+    // For organizer filter, we need to join with events
+    let pipeline = []
+
+    if (organizer_id) {
+      // Use aggregation pipeline to join with events collection
+      pipeline = [
+        {
+          $lookup: {
+            from: 'events',
+            localField: 'eventId',
+            foreignField: '_id',
+            as: 'event'
+          }
+        },
+        {
+          $match: {
+            'event.organizerId': organizer_id,
+            ...query
+          }
+        }
+      ]
+    } else {
+      // Simple find if no organizer filter
+      pipeline = [{ $match: query }]
+    }
+
+    // Add status filter based on blockchain fields
+    if (status_filter) {
+      let statusMatch = {}
+      switch (status_filter.toLowerCase()) {
+        case 'draft':
+          statusMatch = {
+            $or: [
+              { blockchainTicketTypeId: { $exists: false } },
+              { blockchainTicketTypeId: '' }
+            ]
+          }
+          break
+        case 'created':
+          statusMatch = {
+            blockchainTicketTypeId: { $exists: true, $ne: '' }
+          }
+          break
+        case 'published':
+          statusMatch = {
+            blockchainTicketTypeId: { $exists: true, $ne: '' }
+          }
+          break
+      }
+      pipeline.push({ $match: statusMatch })
+    }
+
+    // Add pagination
+    let skip = 0
+    if (page_token && !isNaN(parseInt(page_token))) {
+      skip = parseInt(page_token)
+    }
+
+    pipeline.push(
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: parseInt(page_size) }
+    )
+
+    // Execute aggregation
+    const ticketTypes = await TicketType.aggregate(pipeline)
+
+    // Get total count for pagination
+    const countPipeline = [...pipeline.slice(0, -2)] // Remove skip and limit
+    countPipeline.push({ $count: 'total' })
+    const countResult = await TicketType.aggregate(countPipeline)
+    const totalCount = countResult[0]?.total || 0
+
+    // Convert to proto format
+    const protoTicketTypes = ticketTypes.map(tt => {
+      // Handle aggregation result format
+      const ticketTypeDoc = tt.event ? tt : { ...tt, event: null }
+      return ticketTypeToProto(ticketTypeDoc)
+    })
+
+    // Calculate next page token
+    const nextPageToken =
+      skip + protoTicketTypes.length < totalCount
+        ? (skip + parseInt(page_size)).toString()
+        : ''
+
+    console.log(
+      `TicketTypeService: Returning ${protoTicketTypes.length} ticket types out of ${totalCount} total`
+    )
+
+    callback(null, {
+      ticket_types: protoTicketTypes,
+      next_page_token: nextPageToken,
+      total_count: totalCount
+    })
+  } catch (error) {
+    console.error('TicketTypeService: ListAllTicketTypes RPC error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to list all ticket types.'
+    })
+  }
+}
+
+// ✅ Export hàm mới
 module.exports = {
   CreateTicketType,
   UpdateTicketType,
@@ -576,5 +714,6 @@ module.exports = {
   GetTicketTypeWithAvailability,
   ListTicketTypesByEvent,
   ListTicketTypesBySession,
-  PublishTicketType // ✅ NEW
+  PublishTicketType,
+  ListAllTicketTypes // ✅ NEW
 }

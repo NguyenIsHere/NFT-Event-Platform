@@ -27,9 +27,22 @@ function convertToMillis (timeStr) {
 
 function generateAccessToken (userId, roles = []) {
   if (!JWT_SECRET) throw new Error('JWT_SECRET is not defined')
-  return jwt.sign({ userId, roles, iss: 'my-application' }, JWT_SECRET, {
-    expiresIn: ACCESS_TOKEN_EXPIRATION
-  })
+
+  console.log('🔍 Generating JWT with:', { userId, roles })
+
+  const payload = {
+    userId,
+    roles: Array.isArray(roles) ? roles : [roles], // ✅ Ensure it's array
+    role: Array.isArray(roles) ? roles[0] : roles, // ✅ Single role for compatibility
+    type: 'access',
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 15 * 60, // 15 minutes
+    iss: 'my-application'
+  }
+
+  console.log('🔍 JWT Payload:', payload)
+
+  return jwt.sign(payload, JWT_SECRET, { algorithm: 'HS256' })
 }
 
 function generateRefreshToken (userId, roles = []) {

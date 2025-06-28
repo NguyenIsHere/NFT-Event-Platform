@@ -39,6 +39,13 @@ service TicketTypeService {
       body: "*"
     };
   }
+
+  // ✅ NEW: Get all ticket types for admin
+  rpc ListAllTicketTypes(ListAllTicketTypesRequest) returns (ListTicketTypesResponse) {
+    option (google.api.http) = {
+      get: "/v1/ticket-types"
+    };
+  }
   
   rpc ListTicketTypesByEvent(ListTicketTypesByEventRequest) returns (ListTicketTypesResponse) {
     option (google.api.http) = {
@@ -513,4 +520,12 @@ message PrepareMetadataRequest {
 message PrepareMetadataResponse {
   bool success = 1;
   repeated string metadata_uris = 2;
+}
+
+message ListAllTicketTypesRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  string status_filter = 3;
+  string organizer_id = 4;
+  string event_id = 5;
 }

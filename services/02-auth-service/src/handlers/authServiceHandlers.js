@@ -37,10 +37,17 @@ async function Login (call, callback) {
         }
 
         // 2. Tạo Access Token và Refresh Token
+        // Trong Login function
         const accessToken = jwtUtils.generateAccessToken(
           userResponse.id,
-          userResponse.role ? [userResponse.role] : ['USER']
+          userResponse.role ? [userResponse.role] : ['USER'] // ✅ Pass as array
         )
+
+        console.log('🔍 Generated token for user:', {
+          userId: userResponse.id,
+          role: userResponse.role,
+          tokenPreview: accessToken.substring(0, 50) + '...'
+        })
         const refreshTokenString = jwtUtils.generateRefreshToken(
           userResponse.id,
           userResponse.role ? [userResponse.role] : ['USER']
