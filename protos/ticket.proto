@@ -138,6 +138,12 @@ service TicketService {
     };
   }
 
+  rpc GetPurchaseAnalytics(GetPurchaseAnalyticsRequest) returns (GetPurchaseAnalyticsResponse) {
+    option (google.api.http) = {
+      get: "/v1/events/{event_id}/analytics/purchase"
+    };
+  }
+
   rpc GetSoldSeatsByEvent(GetSoldSeatsByEventRequest) returns (GetSoldSeatsByEventResponse) {
     option (google.api.http) = {
       get: "/v1/tickets/sold-seats/event/{event_id}"
@@ -171,6 +177,33 @@ service SettlementService {
       get: "/v1/settlements/transactions"
     };
   }
+}
+
+message GetPurchaseAnalyticsRequest {
+  string event_id = 1;
+  string time_period = 2; // TODAY, WEEK, MONTH, ALL
+}
+
+message GetPurchaseAnalyticsResponse {
+  string event_id = 1;
+  string time_period = 2;
+  repeated HourlyPurchase hourly_purchases = 3;
+  double avg_purchase_quantity = 4;
+  string avg_purchase_value_wei = 5;
+  repeated PurchaseFlowStep purchase_flow = 6;
+}
+
+message HourlyPurchase {
+  int32 hour = 1;
+  int32 initiated_count = 2;
+  int32 confirmed_count = 3;
+}
+
+message PurchaseFlowStep {
+  int32 hour = 1;
+  string status = 2;
+  int32 count = 3;
+  int32 total_quantity = 4;
 }
 
 // _____ Models _____
@@ -357,14 +390,6 @@ message DateRange {
   int64 end_date = 2;
 }
 
-message EventDashboardResponse {
-  string event_id = 1;
-  DateRange date_range = 2;
-  TicketSummary ticket_summary = 3;
-  RevenueSummary revenue_summary = 4;
-  CheckinSummary checkin_summary = 5;
-  repeated DailySale daily_trends = 6;
-}
 
 message TicketSummary {
   int32 total_tickets = 1;
@@ -386,11 +411,6 @@ message RevenueSummary {
 message CheckinSummary {
   int32 total_minted = 1;
   repeated StatusCount by_status = 2;
-}
-
-message DailySale {
-  string date = 1;
-  int32 tickets_sold = 2;
 }
 
 message OrganizerStatsRequest {
@@ -426,6 +446,37 @@ message HourlyCheckin {
 message LocationCount {
   string location = 1;
   int32 count = 2;
+}
+
+message PurchaseSummary {
+  int32 total_purchases = 1;
+  repeated StatusCount by_status = 2;
+  string conversion_rate = 3;
+  string abandonment_rate = 4;
+}
+
+message EventDashboardResponse {
+  string event_id = 1;
+  DateRange date_range = 2;
+  TicketSummary ticket_summary = 3;
+  PurchaseSummary purchase_summary = 4; // ✅ NEW: Purchase analytics
+  RevenueSummary revenue_summary = 5;
+  CheckinSummary checkin_summary = 6;
+  repeated DailySale daily_trends = 7;
+  repeated PurchaseFunnelStep purchase_funnel = 8; // ✅ NEW: Purchase funnel
+}
+
+message PurchaseFunnelStep {
+  string status = 1;
+  int32 count = 2;
+  int64 avg_completion_time_ms = 3;
+}
+
+message DailySale {
+  string date = 1;
+  int32 tickets_sold = 2;
+  int32 purchase_count = 3; // ✅ NEW: Purchase count per day
+  string revenue_wei = 4; // ✅ NEW: Revenue per day
 }
 
 // Settlement Messages (unchanged)
@@ -529,3 +580,4 @@ message ListAllTicketTypesRequest {
   string organizer_id = 4;
   string event_id = 5;
 }
+

@@ -14,7 +14,8 @@ const { Purchase } = require('../models/Purchase')
 const {
   GetEventDashboard,
   GetOrganizerStats,
-  GetCheckinAnalytics
+  GetCheckinAnalytics,
+  GetPurchaseAnalytics
 } = require('./analyticsHandlers')
 const ethers = require('ethers')
 
@@ -569,7 +570,11 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
         const metadataCid = metadataUri.replace('ipfs://', '')
 
         // Generate QR code
-        const qrCodeResult = generateQRCodeData(ticket.id, ticket.ownerAddress)
+        const qrCodeResult = generateQRCodeData({
+          ticketId: ticket.id,
+          eventId: ticket.eventId,
+          ownerAddress: ticket.ownerAddress
+        })
 
         let qrCodeDataString, qrCodeSecret
 
@@ -1341,5 +1346,6 @@ module.exports = {
   GetEventDashboard,
   GetOrganizerStats,
   GetCheckinAnalytics,
+  GetPurchaseAnalytics,
   GetSoldSeatsByEvent
 }
