@@ -10,7 +10,8 @@ const purchaseSchema = new Schema(
       index: true
     },
     ticketTypeId: {
-      type: String,
+      type: Schema.Types.ObjectId, // ✅ FIX: Thay đổi từ String sang ObjectId
+      ref: 'TicketType', // ✅ ADD: Thêm tham chiếu
       required: true
     },
     quantity: {

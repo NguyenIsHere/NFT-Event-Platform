@@ -32,6 +32,7 @@ async function GetEventDashboard (call, callback) {
     console.log('📋 Found ticket types:', ticketTypeIds.length)
 
     // 2. ✅ ENHANCED: Purchase Analytics (primary source)
+    // Thay thế dòng 47-74
     const purchaseStats = await Purchase.aggregate([
       {
         $match: {
@@ -55,13 +56,31 @@ async function GetEventDashboard (call, callback) {
         }
       },
       {
+        $addFields: {
+          // ✅ FIX: Safer price conversion
+          priceWeiNumber: {
+            $cond: {
+              if: { $type: '$ticketType.priceWei' },
+              then: {
+                $cond: {
+                  if: { $eq: [{ $type: '$ticketType.priceWei' }, 'string'] },
+                  then: { $toLong: '$ticketType.priceWei' },
+                  else: '$ticketType.priceWei'
+                }
+              },
+              else: 0
+            }
+          }
+        }
+      },
+      {
         $group: {
           _id: '$status',
           count: { $sum: 1 },
           totalQuantity: { $sum: '$quantity' },
           totalValue: {
             $sum: {
-              $multiply: ['$quantity', { $toLong: '$ticketType.priceWei' }]
+              $multiply: ['$quantity', '$priceWeiNumber']
             }
           }
         }
@@ -261,64 +280,147 @@ async function GetEventDashboard (call, callback) {
 
     const confirmedPurchases = purchaseStats.find(p => p._id === 'CONFIRMED')
 
-    if (confirmedPurchases && confirmedPurchases.totalValue) {
-      totalRevenue = confirmedPurchases.totalValue
-      totalTicketsFromPurchases = confirmedPurchases.totalQuantity
-      console.log('💰 Revenue from confirmed purchases:', {
-        totalRevenue,
-        totalTickets: totalTicketsFromPurchases,
-        purchaseCount: confirmedPurchases.count
-      })
-    } else {
-      // ✅ FALLBACK: Calculate from ticket types and confirmed transactions
-      console.log(
-        '⚠️ No confirmed purchases with totalValue, calculating fallback...'
-      )
+    if (confirmedPurchases) {
+      // ✅ FIX: Use confirmed purchases data directly first
+      totalRevenue = confirmedPurchases.totalValue || 0
+      totalTicketsFromPurchases = confirmedPurchases.totalQuantity || 0
 
-      const fallbackRevenue = await Ticket.aggregate([
-        {
-          $match: {
-            eventId: event_id,
-            status: TICKET_STATUS_ENUM[4], // MINTED
-            createdAt: { $gte: startDate, $lte: endDate }
+      console.log('💰 Revenue calculation from confirmed purchases:', {
+        confirmedPurchases,
+        totalRevenue,
+        totalTicketsFromPurchases
+      })
+
+      // ✅ FIX: Only use fallback if primary calculation gives zero but we have tickets
+      // Alternative: Calculate revenue from minted tickets if no purchase data
+      if (totalRevenue === 0) {
+        console.log('🔍 Attempting to calculate revenue from minted tickets...')
+
+        try {
+          const ticketRevenue = await Ticket.aggregate([
+            {
+              $match: {
+                eventId: event_id,
+                status: 'MINTED',
+                createdAt: { $gte: startDate, $lte: endDate }
+              }
+            },
+            {
+              $lookup: {
+                from: 'tickettypes',
+                localField: 'ticketTypeId',
+                foreignField: '_id',
+                as: 'ticketType'
+              }
+            },
+            {
+              $addFields: {
+                ticketType: { $arrayElemAt: ['$ticketType', 0] }
+              }
+            },
+            {
+              $group: {
+                _id: null,
+                totalRevenue: {
+                  $sum: {
+                    $cond: {
+                      if: {
+                        $eq: [{ $type: '$ticketType.priceWei' }, 'string']
+                      },
+                      then: { $toLong: '$ticketType.priceWei' },
+                      else: '$ticketType.priceWei'
+                    }
+                  }
+                },
+                ticketCount: { $sum: 1 }
+              }
+            }
+          ])
+
+          if (ticketRevenue[0]?.totalRevenue) {
+            totalRevenue = ticketRevenue[0].totalRevenue
+            console.log('✅ Calculated revenue from minted tickets:', {
+              totalRevenue,
+              ticketCount: ticketRevenue[0].ticketCount
+            })
           }
-        },
-        {
-          $lookup: {
-            from: 'tickettypes',
-            localField: 'ticketTypeId',
-            foreignField: '_id',
-            as: 'ticketType'
-          }
-        },
-        {
-          $addFields: {
-            ticketType: { $arrayElemAt: ['$ticketType', 0] }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            totalTickets: { $sum: 1 },
-            totalRevenue: {
-              $sum: { $toLong: '$ticketType.priceWei' }
+        } catch (ticketRevenueError) {
+          console.error(
+            '❌ Ticket revenue calculation failed:',
+            ticketRevenueError
+          )
+        }
+      }
+    } else {
+      console.log('⚠️ No confirmed purchases found')
+
+      // ✅ ADD: Try to get revenue from any existing CONFIRMED purchases in the date range
+      // ✅ FIX: Fallback logic - tính doanh thu từ các vé đã MINTED
+      try {
+        const mintedTicketRevenue = await Ticket.aggregate([
+          {
+            $match: {
+              eventId: event_id,
+              status: 'MINTED', // Chỉ tính các vé đã mint thành công
+              createdAt: { $gte: startDate, $lte: endDate }
+            }
+          },
+          {
+            $lookup: {
+              from: 'tickettypes',
+              localField: 'ticketTypeId',
+              foreignField: '_id',
+              as: 'ticketTypeInfo'
+            }
+          },
+          {
+            $unwind: '$ticketTypeInfo'
+          },
+          {
+            $group: {
+              _id: null,
+              totalRevenue: {
+                $sum: {
+                  $toLong: '$ticketTypeInfo.priceWei'
+                }
+              },
+              totalTickets: { $sum: 1 }
             }
           }
-        }
-      ])
+        ])
 
-      if (fallbackRevenue[0]) {
-        totalRevenue = fallbackRevenue[0].totalRevenue
-        totalTicketsFromPurchases = fallbackRevenue[0].totalTickets
-        console.log('💰 Fallback revenue calculation:', {
-          totalRevenue,
-          totalTickets: totalTicketsFromPurchases
-        })
+        if (
+          mintedTicketRevenue.length > 0 &&
+          mintedTicketRevenue[0].totalRevenue > 0
+        ) {
+          totalRevenue = mintedTicketRevenue[0].totalRevenue
+          totalTicketsFromPurchases = mintedTicketRevenue[0].totalTickets
+          console.log('✅ Calculated revenue from MINTED tickets (fallback):', {
+            totalRevenue,
+            totalTicketsFromPurchases
+          })
+        } else {
+          console.log(
+            '⚠️ Fallback calculation from minted tickets also yielded no revenue.'
+          )
+        }
+      } catch (fallbackError) {
+        console.error(
+          '❌ Error during fallback revenue calculation:',
+          fallbackError
+        )
       }
     }
 
     const platformFee = Math.floor(totalRevenue * 0.05) // 5% platform fee
     const organizerRevenue = totalRevenue - platformFee
+
+    console.log('💰 Final revenue calculation:', {
+      totalRevenue,
+      platformFee,
+      organizerRevenue,
+      totalTicketsFromPurchases
+    })
 
     // Format response với enhanced analytics
     const dashboard = {
