@@ -155,6 +155,12 @@ service TicketService {
       get: "/v1/tickets/metadata/{ticket_id}"
     };
   }
+
+  rpc GetMyTicketsWithDetails(GetMyTicketsWithDetailsRequest) returns (GetMyTicketsWithDetailsResponse) {
+  option (google.api.http) = {
+    get: "/v1/tickets/my-tickets/{owner_address}/details"
+  };
+}
 }
 
 // THÊM Settlement Service
@@ -579,5 +585,67 @@ message ListAllTicketTypesRequest {
   string status_filter = 3;
   string organizer_id = 4;
   string event_id = 5;
+}
+
+// Thêm request message
+message GetMyTicketsWithDetailsRequest {
+  string owner_address = 1;  // Wallet address của người dùng
+}
+
+// Thêm response message
+message GetMyTicketsWithDetailsResponse {
+  repeated TicketWithDetails tickets = 1;
+}
+
+// Thêm TicketWithDetails message để chứa thông tin chi tiết
+message TicketWithDetails {
+  // Thông tin ticket
+  string id = 1;
+  string event_id = 2;
+  string ticket_type_id = 3;
+  string token_id = 4;
+  string owner_address = 5;
+  string session_id = 6;
+  string status = 7;
+  string token_uri_cid = 8;
+  string transaction_hash = 9;
+  int64 created_at = 10;
+  string qr_code_data = 11;
+  string check_in_status = 12;
+  int64 check_in_time = 13;
+  string check_in_location = 14;
+  int64 expiry_time = 15;
+  SeatInfo seat_info = 16;
+  
+  // Thông tin ticket type
+  TicketTypeDetails ticket_type = 17;
+  
+  // Thông tin event
+  EventDetails event = 18;
+}
+
+// Chi tiết ticket type
+message TicketTypeDetails {
+  string id = 1;
+  string name = 2;
+  string price_wei = 3;
+}
+
+// Chi tiết event
+message EventDetails {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string location = 4;
+  string banner_url_cid = 5;
+  repeated SessionDetails sessions = 6;
+}
+
+// Chi tiết session
+message SessionDetails {
+  string id = 1;
+  string name = 2;
+  int64 start_time = 3;
+  int64 end_time = 4;
 }
 

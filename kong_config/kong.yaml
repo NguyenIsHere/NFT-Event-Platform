@@ -351,6 +351,12 @@ routes:
     methods: [GET]
     strip_path: false
 
+  - name: ticket-get-my-tickets-details-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/tickets/my-tickets/(?<owner_address>[^/]+)/details$"]
+    methods: [GET]
+    strip_path: false
+
   # === SeatMap Service Routes ===
   - name: seatmap-create-for-event-route-v1
     service: seatmap-grpc-service

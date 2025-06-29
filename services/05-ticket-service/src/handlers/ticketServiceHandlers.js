@@ -555,65 +555,72 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
     purchase.transactionHash = payment_transaction_hash
     await purchase.save()
 
+    // ✅ FIX: Get event data to set proper expiry times
+    let eventData = null
+    try {
+      const eventResponse = await new Promise((resolve, reject) => {
+        eventServiceClient.GetEvent(
+          { event_id: purchase.purchaseDetails.event_id },
+          (err, response) => {
+            if (err) reject(err)
+            else resolve(response)
+          }
+        )
+      })
+      eventData = eventResponse.event
+    } catch (eventError) {
+      console.warn('Could not fetch event data:', eventError)
+    }
+
+    // Process each ticket
     // Process each ticket
     const updatedTickets = []
     for (let i = 0; i < relatedTickets.length; i++) {
-      const ticket = relatedTickets[i]
-      try {
-        // ✅ FIX: Use pre-generated metadata URI
-        const metadataUri = purchase.metadataUris[i]
-        if (!metadataUri) {
-          throw new Error(`No metadata URI found for ticket ${i}`)
-        }
+      const relatedTicket = relatedTickets[i]
+      const tokenId = mintedTokenIds[i]
+      const metadataUri = purchase.metadataUris[i]
 
-        // Extract CID from URI
-        const metadataCid = metadataUri.replace('ipfs://', '')
-
-        // Generate QR code
-        const qrCodeResult = generateQRCodeData({
-          ticketId: ticket.id,
-          eventId: ticket.eventId,
-          ownerAddress: ticket.ownerAddress
-        })
-
-        let qrCodeDataString, qrCodeSecret
-
-        if (typeof qrCodeResult === 'object' && qrCodeResult.qrCodeData) {
-          qrCodeDataString = qrCodeResult.qrCodeData
-          qrCodeSecret = qrCodeResult.qrCodeSecret
-        } else if (typeof qrCodeResult === 'string') {
-          qrCodeDataString = qrCodeResult
-          qrCodeSecret = null
-        } else {
-          throw new Error('Invalid QR code generation result')
-        }
-
-        // ✅ FIX: Use correct token ID from blockchain logs
-        const tokenId = mintedTokenIds[i] || `unknown_${i}`
-
-        // Update ticket with blockchain data
-        ticket.status = 'MINTED'
-        ticket.tokenId = tokenId
-        ticket.tokenUriCid = metadataUri // Store full URI including ipfs://
-        ticket.transactionHash = payment_transaction_hash
-        ticket.qrCodeData = qrCodeDataString
-        ticket.checkInStatus = 'NOT_CHECKED_IN'
-
-        if (qrCodeSecret) {
-          ticket.qrCodeSecret = qrCodeSecret
-        }
-
-        await ticket.save()
-        updatedTickets.push(ticket)
-
-        console.log(
-          `✅ Successfully processed ticket ${ticket.id} with token ID: ${tokenId}, metadata: ${metadataUri}`
+      // ✅ FIX: Set expiry time based on session end time
+      let expiryTime = null
+      if (eventData && eventData.sessions) {
+        const ticketSession = eventData.sessions.find(
+          s => s.id === relatedTicket.sessionId
         )
-      } catch (ticketError) {
-        console.error(`❌ Error processing ticket ${ticket.id}:`, ticketError)
-        ticket.status = 'MINT_FAILED'
-        await ticket.save()
+        if (ticketSession) {
+          expiryTime = new Date(ticketSession.end_time * 1000)
+        } else if (eventData.sessions.length > 0) {
+          // Fallback to first session
+          expiryTime = new Date(eventData.sessions[0].end_time * 1000)
+        }
       }
+
+      // If we still don't have expiry time, set to 30 days from now
+      if (!expiryTime) {
+        expiryTime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      }
+
+      // ✅ FIX: Auto-generate QR code for minted tickets
+      const qrData = generateQRCodeData({
+        ticketId: relatedTicket.id,
+        eventId: relatedTicket.eventId,
+        ownerAddress: relatedTicket.ownerAddress
+      })
+
+      // Update ticket
+      relatedTicket.status = 'MINTED'
+      relatedTicket.tokenId = tokenId
+      relatedTicket.tokenUriCid = metadataUri
+      relatedTicket.transactionHash = payment_transaction_hash
+      relatedTicket.qrCodeData = qrData.qrCodeData
+      relatedTicket.qrCodeSecret = qrData.qrCodeSecret
+      relatedTicket.expiryTime = expiryTime
+
+      await relatedTicket.save()
+      updatedTickets.push(relatedTicket)
+
+      console.log(
+        `✅ Updated ticket ${relatedTicket.id} with token ID ${tokenId} and expiry ${expiryTime}`
+      )
     }
 
     // ✅ FIX: Properly update availability
@@ -758,7 +765,7 @@ async function GenerateQRCode (call, callback) {
     if (!mongoose.Types.ObjectId.isValid(ticket_id)) {
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
-        message: 'Invalid ticket ID format'
+        message: 'Invalid ticket ID format.'
       })
     }
 
@@ -767,80 +774,86 @@ async function GenerateQRCode (call, callback) {
     if (!ticket) {
       return callback({
         code: grpc.status.NOT_FOUND,
-        message: 'Ticket not found'
+        message: 'Ticket not found.'
       })
     }
 
     // ✅ FIX: Allow QR generation for MINTED tickets
     if (ticket.status !== TICKET_STATUS_ENUM[4]) {
-      // MINTED
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
-        message: `Cannot generate QR code for ticket with status: ${ticket.status}. Ticket must be MINTED.`
+        message: `Cannot generate QR code for ticket with status: ${ticket.status}`
       })
+    }
+
+    // ✅ FIX: Get event and session info to set proper expiry time
+    let eventData = null
+    let sessionEndTime = null
+
+    try {
+      const eventResponse = await new Promise((resolve, reject) => {
+        eventServiceClient.GetEvent(
+          { event_id: ticket.eventId },
+          (err, response) => {
+            if (err) reject(err)
+            else resolve(response)
+          }
+        )
+      })
+
+      eventData = eventResponse.event
+
+      // Find the specific session for this ticket
+      if (eventData && eventData.sessions) {
+        const ticketSession = eventData.sessions.find(
+          s => s.id === ticket.sessionId
+        )
+        if (ticketSession) {
+          sessionEndTime = new Date(ticketSession.end_time * 1000) // Convert to milliseconds
+          console.log(
+            `✅ Found session end time: ${sessionEndTime} for ticket ${ticket_id}`
+          )
+        } else {
+          console.warn(
+            `⚠️ Session not found for ticket ${ticket_id}, using first session`
+          )
+          // Fallback to first session if specific session not found
+          sessionEndTime = new Date(eventData.sessions[0].end_time * 1000)
+        }
+      }
+    } catch (eventError) {
+      console.warn('Could not fetch event data for QR expiry:', eventError)
+      // Fallback: Set expiry to 24 hours from now if we can't get event data
+      sessionEndTime = new Date(Date.now() + 24 * 60 * 60 * 1000)
     }
 
     // ✅ FIX: Generate QR code if not exists, or regenerate if requested
     let needsUpdate = false
 
     if (!ticket.qrCodeData || !ticket.qrCodeSecret) {
-      console.log(`🔄 Generating new QR code for ticket ${ticket.id}...`)
-
-      const { qrCodeData, qrCodeSecret } = generateQRCodeData({
+      const qrData = generateQRCodeData({
         ticketId: ticket.id,
         eventId: ticket.eventId,
         ownerAddress: ticket.ownerAddress
       })
 
-      ticket.qrCodeData = qrCodeData
-      ticket.qrCodeSecret = qrCodeSecret
+      ticket.qrCodeData = qrData.qrCodeData
+      ticket.qrCodeSecret = qrData.qrCodeSecret
       needsUpdate = true
     }
 
-    // ✅ FIX: Set expiry time if not set
-    if (!ticket.expiryTime) {
-      try {
-        const ticketType = await TicketType.findById(ticket.ticketTypeId)
-        if (ticketType) {
-          const eventResponse = await new Promise((resolve, reject) => {
-            eventServiceClient.GetEvent(
-              {
-                event_id: ticketType.eventId
-              },
-              { deadline: new Date(Date.now() + 5000) },
-              (err, res) => {
-                if (err) reject(err)
-                else resolve(res)
-              }
-            )
-          })
-
-          if (eventResponse?.event?.sessions) {
-            const targetSession = eventResponse.event.sessions.find(
-              s => s.id === ticketType.sessionId
-            )
-            if (targetSession) {
-              // Set expiry to 24 hours after event end time
-              const eventEndTime = new Date(targetSession.end_time * 1000)
-              ticket.expiryTime = new Date(
-                eventEndTime.getTime() + 24 * 60 * 60 * 1000
-              )
-              needsUpdate = true
-            }
-          }
-        }
-      } catch (expiryError) {
-        console.warn('⚠️ Could not set ticket expiry time:', expiryError)
-        // Set default expiry to 30 days from now
-        ticket.expiryTime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-        needsUpdate = true
-      }
+    // ✅ FIX: Set expiry time based on session end time
+    if (!ticket.expiryTime || sessionEndTime) {
+      ticket.expiryTime =
+        sessionEndTime || new Date(Date.now() + 24 * 60 * 60 * 1000)
+      needsUpdate = true
+      console.log(`✅ Set ticket expiry time to: ${ticket.expiryTime}`)
     }
 
     // Save updates if needed
     if (needsUpdate) {
       await ticket.save()
-      console.log(`✅ Ticket ${ticket.id} updated with QR code and expiry`)
+      console.log(`✅ Updated ticket ${ticket_id} with QR code and expiry time`)
     }
 
     // ✅ FIX: Generate QR code image
@@ -1332,6 +1345,145 @@ async function PrepareMetadata (call, callback) {
   }
 }
 
+// Add this to your backend
+// ...existing code...
+
+// ✅ FIX: Sửa GetMyTicketsWithDetails để generate QR code image đúng cách
+async function GetMyTicketsWithDetails (call, callback) {
+  try {
+    const { owner_address } = call.request
+
+    if (!owner_address) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Owner address is required'
+      })
+    }
+
+    console.log(`🔍 Fetching tickets with details for: ${owner_address}`)
+
+    // Find all tickets for this owner
+    const tickets = await Ticket.find({
+      ownerAddress: owner_address.toLowerCase(),
+      status: 'MINTED'
+    }).sort({ createdAt: -1 })
+
+    if (tickets.length === 0) {
+      return callback(null, { tickets: [] })
+    }
+
+    // Get unique eventIds and ticketTypeIds
+    const eventIds = [...new Set(tickets.map(t => t.eventId))]
+    const ticketTypeIds = [...new Set(tickets.map(t => t.ticketTypeId))]
+
+    // Batch fetch events and ticket types
+    const [eventResponses, ticketTypeResponses] = await Promise.all([
+      Promise.all(
+        eventIds.map(
+          eventId =>
+            new Promise((resolve, reject) => {
+              eventServiceClient.GetEvent({ event_id: eventId }, (err, res) => {
+                if (err) {
+                  console.warn(`Event ${eventId} not found:`, err.message)
+                  resolve({ event_id: eventId, event: null })
+                } else {
+                  resolve({ event_id: eventId, event: res.event })
+                }
+              })
+            })
+        )
+      ),
+      Promise.all(
+        ticketTypeIds.map(typeId =>
+          TicketType.findById(typeId).catch(err => {
+            console.warn(`TicketType ${typeId} not found:`, err.message)
+            return null
+          })
+        )
+      )
+    ])
+
+    // Create lookup maps
+    const eventsMap = {}
+    eventResponses.forEach(response => {
+      if (response.event) {
+        eventsMap[response.event_id] = response.event
+      }
+    })
+
+    const ticketTypesMap = {}
+    ticketTypeResponses.forEach((type, index) => {
+      if (type) {
+        ticketTypesMap[ticketTypeIds[index]] = type
+      }
+    })
+
+    // Transform tickets with full details
+    const detailedTickets = await Promise.all(
+      tickets.map(async ticket => {
+        const event = eventsMap[ticket.eventId]
+        const ticketType = ticketTypesMap[ticket.ticketTypeId]
+
+        // ✅ FIX: Generate QR code image if data exists
+        let qrCodeImageBase64 = null
+        if (ticket.qrCodeData) {
+          try {
+            qrCodeImageBase64 = await generateQRCodeImage(ticket.qrCodeData)
+            // Remove the data:image/png;base64, prefix to get just the base64 data
+            if (qrCodeImageBase64.startsWith('data:image/png;base64,')) {
+              qrCodeImageBase64 = qrCodeImageBase64.replace(
+                'data:image/png;base64,',
+                ''
+              )
+            }
+          } catch (qrError) {
+            console.warn(
+              `Failed to generate QR image for ticket ${ticket.id}:`,
+              qrError.message
+            )
+          }
+        }
+
+        return {
+          id: ticket.id,
+          event_id: ticket.eventId,
+          ticket_type_id: ticket.ticketTypeId,
+          token_id: ticket.tokenId || '',
+          owner_address: ticket.ownerAddress,
+          session_id: ticket.sessionId,
+          status: ticket.status,
+          created_at: Math.floor(ticket.createdAt.getTime() / 1000),
+          check_in_status: ticket.checkInStatus,
+          check_in_time: ticket.checkInTime
+            ? Math.floor(ticket.checkInTime.getTime() / 1000)
+            : 0,
+          expiry_time: ticket.expiryTime
+            ? Math.floor(ticket.expiryTime.getTime() / 1000)
+            : 0,
+          seat_info: ticket.seatInfo || null,
+          qr_code_data: qrCodeImageBase64, // ✅ This is now the actual image base64
+          event: event || null,
+          ticket_type: ticketType
+            ? {
+                id: ticketType.id,
+                name: ticketType.name,
+                price_wei: ticketType.priceWei
+              }
+            : null
+        }
+      })
+    )
+
+    callback(null, { tickets: detailedTickets })
+  } catch (error) {
+    console.error('GetMyTicketsWithDetails error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to get tickets with details'
+    })
+  }
+}
+
 module.exports = {
   InitiatePurchase,
   ConfirmPaymentAndRequestMint,
@@ -1347,5 +1499,6 @@ module.exports = {
   GetOrganizerStats,
   GetCheckinAnalytics,
   GetPurchaseAnalytics,
-  GetSoldSeatsByEvent
+  GetSoldSeatsByEvent,
+  GetMyTicketsWithDetails
 }
