@@ -780,6 +780,7 @@ async function GenerateQRCode (call, callback) {
 
     // ✅ FIX: Allow QR generation for MINTED tickets
     if (ticket.status !== TICKET_STATUS_ENUM[4]) {
+      // MINTED
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
         message: `Cannot generate QR code for ticket with status: ${ticket.status}`
@@ -809,7 +810,7 @@ async function GenerateQRCode (call, callback) {
           s => s.id === ticket.sessionId
         )
         if (ticketSession) {
-          sessionEndTime = new Date(ticketSession.end_time * 1000) // Convert to milliseconds
+          sessionEndTime = new Date(ticketSession.end_time * 1000)
           console.log(
             `✅ Found session end time: ${sessionEndTime} for ticket ${ticket_id}`
           )
@@ -817,13 +818,11 @@ async function GenerateQRCode (call, callback) {
           console.warn(
             `⚠️ Session not found for ticket ${ticket_id}, using first session`
           )
-          // Fallback to first session if specific session not found
           sessionEndTime = new Date(eventData.sessions[0].end_time * 1000)
         }
       }
     } catch (eventError) {
       console.warn('Could not fetch event data for QR expiry:', eventError)
-      // Fallback: Set expiry to 24 hours from now if we can't get event data
       sessionEndTime = new Date(Date.now() + 24 * 60 * 60 * 1000)
     }
 
@@ -840,6 +839,7 @@ async function GenerateQRCode (call, callback) {
       ticket.qrCodeData = qrData.qrCodeData
       ticket.qrCodeSecret = qrData.qrCodeSecret
       needsUpdate = true
+      console.log(`✅ Generated new QR data for ticket ${ticket_id}`)
     }
 
     // ✅ FIX: Set expiry time based on session end time
@@ -856,14 +856,31 @@ async function GenerateQRCode (call, callback) {
       console.log(`✅ Updated ticket ${ticket_id} with QR code and expiry time`)
     }
 
-    // ✅ FIX: Generate QR code image
-    const qrCodeImageBase64 = await generateQRCodeImage(ticket.qrCodeData)
+    // ✅ FIX: Generate QR code image from the JSON data
+    console.log(
+      `🔍 Generating QR image for data: ${ticket.qrCodeData.substring(
+        0,
+        50
+      )}...`
+    )
+
+    const qrCodeImageDataURL = await generateQRCodeImage(ticket.qrCodeData)
+
+    // ✅ Extract base64 data without the data:image/png;base64, prefix
+    const base64ImageData = qrCodeImageDataURL.replace(
+      'data:image/png;base64,',
+      ''
+    )
+
+    console.log(
+      `✅ Generated QR image, base64 length: ${base64ImageData.length}`
+    )
 
     callback(null, {
       success: true,
       message: 'QR code generated successfully',
-      qr_code_data: ticket.qrCodeData,
-      qr_code_image_base64: qrCodeImageBase64
+      qr_code_data: ticket.qrCodeData, // JSON data for verification
+      qr_code_image_base64: base64ImageData // Pure base64 image data
     })
   } catch (error) {
     console.error('TicketService: GenerateQRCode error:', error)
@@ -875,6 +892,7 @@ async function GenerateQRCode (call, callback) {
 }
 
 // Thêm handler cho CheckIn
+// ✅ THÊM: Check-in với validation thời gian session
 async function CheckIn (call, callback) {
   const { qr_code_data, location, scanner_id } = call.request
 
@@ -897,33 +915,16 @@ async function CheckIn (call, callback) {
     if (!ticket) {
       return callback({
         code: grpc.status.NOT_FOUND,
-        message: 'Ticket not found or QR code invalid'
+        message: 'Ticket not found'
       })
     }
 
     // Verify QR code signature
-    // ✅ FIX: Better error mapping for QR verification
     const verification = verifyQRCodeData(qr_code_data, ticket.qrCodeSecret)
     if (!verification.valid) {
-      // Map different failure reasons to appropriate status codes
-      let statusCode = grpc.status.UNAUTHENTICATED
-      let message = `QR code verification failed: ${verification.reason}`
-
-      if (verification.reason === 'QR code expired') {
-        statusCode = grpc.status.FAILED_PRECONDITION // 400 Bad Request
-        message = 'QR code has expired. Please regenerate a new QR code.'
-      } else if (verification.reason === 'Invalid signature') {
-        statusCode = grpc.status.UNAUTHENTICATED // 401 Unauthorized
-        message = 'QR code signature is invalid.'
-      } else if (verification.reason === 'Invalid QR code format') {
-        statusCode = grpc.status.INVALID_ARGUMENT // 400 Bad Request
-        message = 'QR code format is invalid.'
-      }
-
-      console.log(`❌ QR verification failed: ${verification.reason}`)
       return callback({
-        code: statusCode,
-        message: message
+        code: grpc.status.INVALID_ARGUMENT,
+        message: `Invalid QR code: ${verification.reason}`
       })
     }
 
@@ -934,15 +935,100 @@ async function CheckIn (call, callback) {
       // MINTED
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
-        message: 'Ticket is not valid for check-in'
+        message: `Cannot check-in ticket with status: ${ticket.status}`
       })
     }
 
-    // Kiểm tra expiry
-    if (ticket.expiryTime && new Date() > ticket.expiryTime) {
-      ticket.checkInStatus = 'EXPIRED'
-      await ticket.save()
+    // ✅ FIX: Lấy thông tin event và session để validate thời gian
+    let eventData = null
+    try {
+      const eventResponse = await new Promise((resolve, reject) => {
+        eventServiceClient.GetEvent(
+          { event_id: ticket.eventId },
+          (err, response) => {
+            if (err) reject(err)
+            else resolve(response)
+          }
+        )
+      })
+      eventData = eventResponse.event
+    } catch (eventError) {
+      console.warn(
+        'Could not fetch event data for check-in validation:',
+        eventError
+      )
+      return callback({
+        code: grpc.status.INTERNAL,
+        message: 'Cannot validate event details for check-in'
+      })
+    }
 
+    // ✅ FIX: Validate check-in timing dựa trên session
+    const now = Date.now()
+    let relevantSession = null
+
+    if (eventData && eventData.sessions && eventData.sessions.length > 0) {
+      // Find the specific session for this ticket
+      if (ticket.sessionId) {
+        relevantSession = eventData.sessions.find(
+          s => s.id === ticket.sessionId
+        )
+      }
+
+      // Fallback to earliest session if specific session not found
+      if (!relevantSession) {
+        relevantSession = eventData.sessions.reduce((earliest, current) =>
+          current.start_time < earliest.start_time ? current : earliest
+        )
+      }
+
+      if (relevantSession) {
+        const sessionStartTime =
+          relevantSession.start_time < 10000000000
+            ? relevantSession.start_time * 1000
+            : relevantSession.start_time
+
+        const sessionEndTime =
+          relevantSession.end_time < 10000000000
+            ? relevantSession.end_time * 1000
+            : relevantSession.end_time
+
+        // ✅ FIX: Check-in window validation
+        const checkInWindowStart = sessionStartTime - 2 * 60 * 60 * 1000 // 2 giờ trước event
+        const checkInWindowEnd = sessionEndTime // Đến khi event kết thúc
+
+        console.log('🔍 Check-in timing validation:', {
+          now: new Date(now).toISOString(),
+          sessionStart: new Date(sessionStartTime).toISOString(),
+          sessionEnd: new Date(sessionEndTime).toISOString(),
+          checkInWindowStart: new Date(checkInWindowStart).toISOString(),
+          checkInWindowEnd: new Date(checkInWindowEnd).toISOString(),
+          canCheckIn: now >= checkInWindowStart && now <= checkInWindowEnd
+        })
+
+        // Kiểm tra xem có trong thời gian cho phép check-in không
+        if (now < checkInWindowStart) {
+          return callback({
+            code: grpc.status.FAILED_PRECONDITION,
+            message: `Check-in chưa mở. Bạn có thể check-in từ ${new Date(
+              checkInWindowStart
+            ).toLocaleString('vi-VN')}`
+          })
+        }
+
+        if (now > checkInWindowEnd) {
+          return callback({
+            code: grpc.status.FAILED_PRECONDITION,
+            message: `Sự kiện đã kết thúc. Không thể check-in sau ${new Date(
+              checkInWindowEnd
+            ).toLocaleString('vi-VN')}`
+          })
+        }
+      }
+    }
+
+    // Kiểm tra expiry time của ticket
+    if (ticket.expiryTime && new Date() > ticket.expiryTime) {
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
         message: 'Ticket has expired'
@@ -953,23 +1039,37 @@ async function CheckIn (call, callback) {
     if (ticket.checkInStatus === 'CHECKED_IN') {
       return callback({
         code: grpc.status.ALREADY_EXISTS,
-        message: `Ticket already checked in at ${ticket.checkInTime} (${ticket.checkInLocation})`
+        message: `Ticket already checked in at ${
+          ticket.checkInTime
+            ? new Date(ticket.checkInTime).toLocaleString('vi-VN')
+            : 'unknown time'
+        }`
       })
     }
 
-    // Thực hiện check-in
+    // ✅ FIX: Thực hiện check-in với session info
     ticket.checkInStatus = 'CHECKED_IN'
     ticket.checkInTime = new Date()
     ticket.checkInLocation = location || 'Unknown'
 
     await ticket.save()
 
-    console.log(`TicketService: Ticket ${ticket.id} checked in successfully`)
+    console.log(
+      `✅ Ticket ${ticket.id} checked in successfully at ${ticket.checkInTime}`
+    )
 
+    // ✅ FIX: Return detailed response
     callback(null, {
       success: true,
-      message: 'Check-in successful',
-      ticket: ticketDocumentToGrpcTicket(ticket)
+      message: 'Check-in thành công',
+      ticket: ticketDocumentToGrpcTicket(ticket),
+      session_info: relevantSession
+        ? {
+            session_name: relevantSession.name,
+            session_start: relevantSession.start_time,
+            session_end: relevantSession.end_time
+          }
+        : null
     })
   } catch (error) {
     console.error('TicketService: CheckIn error:', error)
@@ -1345,10 +1445,6 @@ async function PrepareMetadata (call, callback) {
   }
 }
 
-// Add this to your backend
-// ...existing code...
-
-// ✅ FIX: Sửa GetMyTicketsWithDetails để generate QR code image đúng cách
 async function GetMyTicketsWithDetails (call, callback) {
   try {
     const { owner_address } = call.request
@@ -1424,24 +1520,20 @@ async function GetMyTicketsWithDetails (call, callback) {
         const event = eventsMap[ticket.eventId]
         const ticketType = ticketTypesMap[ticket.ticketTypeId]
 
-        // ✅ FIX: Generate QR code image if data exists
-        let qrCodeImageBase64 = null
+        // ✅ FIX: Handle QR code properly
+        let qrCodeData = null
         if (ticket.qrCodeData) {
-          try {
-            qrCodeImageBase64 = await generateQRCodeImage(ticket.qrCodeData)
-            // Remove the data:image/png;base64, prefix to get just the base64 data
-            if (qrCodeImageBase64.startsWith('data:image/png;base64,')) {
-              qrCodeImageBase64 = qrCodeImageBase64.replace(
-                'data:image/png;base64,',
-                ''
-              )
-            }
-          } catch (qrError) {
-            console.warn(
-              `Failed to generate QR image for ticket ${ticket.id}:`,
-              qrError.message
-            )
-          }
+          // ✅ Don't generate image here, just return the JSON data
+          // Frontend will handle the image generation
+          qrCodeData = ticket.qrCodeData
+          console.log(
+            `🔍 Ticket ${ticket.id} has QR data: ${qrCodeData.substring(
+              0,
+              50
+            )}...`
+          )
+        } else {
+          console.log(`⚠️ Ticket ${ticket.id} has no QR data`)
         }
 
         return {
@@ -1461,7 +1553,7 @@ async function GetMyTicketsWithDetails (call, callback) {
             ? Math.floor(ticket.expiryTime.getTime() / 1000)
             : 0,
           seat_info: ticket.seatInfo || null,
-          qr_code_data: qrCodeImageBase64, // ✅ This is now the actual image base64
+          qr_code_data: qrCodeData, // ✅ This is the JSON string, not base64 image
           event: event || null,
           ticket_type: ticketType
             ? {
