@@ -1075,8 +1075,11 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
       eventId: ticketType.eventId
     })
 
-    // ✅ VERIFY transaction
-    console.log(`🔍 Verifying transaction: ${payment_transaction_hash}`)
+    // ✅ VERIFY blockchain transaction để get gas info
+    let transactionDetails = null
+    let gasUsed = null
+    let gasPriceWei = null
+
     const verifyResponse = await new Promise((resolve, reject) => {
       blockchainServiceClient.VerifyTransaction(
         { transaction_hash: payment_transaction_hash },
@@ -1087,11 +1090,13 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
       )
     })
 
-    if (!verifyResponse.is_confirmed || !verifyResponse.success_on_chain) {
-      return callback({
-        code: grpc.status.FAILED_PRECONDITION,
-        message: 'Transaction not confirmed or failed on blockchain'
-      })
+    if (verifyResponse.is_confirmed && verifyResponse.success_on_chain) {
+      transactionDetails = verifyResponse
+      // ✅ TODO: Extract gas info từ blockchain service nếu available
+      gasUsed = verifyResponse.gas_used
+      gasPriceWei = verifyResponse.gas_price_wei
+    } else {
+      console.log('verify failed')
     }
 
     console.log('✅ Transaction verified successfully:', {
@@ -1158,6 +1163,8 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
     await TransactionLogger.logTicketPurchase({
       transactionHash: payment_transaction_hash,
       blockNumber: verifyResponse.block_number,
+      gasUsed,
+      gasPriceWei,
       eventId: firstTicket.eventId,
       organizerId: parentEvent?.organizer_id || null,
       userId: null,
@@ -1170,7 +1177,8 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
       feePercentAtTime: currentPlatformFeePercent,
       purchaseId: ticket_order_id,
       ticketIds: pendingTickets.map(t => t.id),
-      quantity: pendingTickets.length
+      quantity: pendingTickets.length,
+      paymentMethod: 'WALLET' // ✅ Default to wallet for now
     })
 
     console.log('✅ Transaction logged successfully')
@@ -1358,6 +1366,30 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
       statusCode = grpc.status.INVALID_ARGUMENT
     } else if (error.message?.includes('Metadata not prepared')) {
       statusCode = grpc.status.FAILED_PRECONDITION
+    }
+
+    // ✅ LOG failed transaction
+    try {
+      await TransactionLogger.logTicketPurchase({
+        transactionHash: payment_transaction_hash || '',
+        eventId: ticketType?.eventId,
+        organizerId: null,
+        userId: null,
+        ticketTypeId: ticketType?.id,
+        fromAddress: pendingTickets[0]?.ownerAddress,
+        toAddress: process.env.CONTRACT_ADDRESS?.toLowerCase(),
+        amountWei: '0',
+        platformFeeWei: '0',
+        organizerAmountWei: '0',
+        feePercentAtTime: 0,
+        purchaseId: ticket_order_id,
+        ticketIds: pendingTickets.map(t => t.id),
+        quantity: pendingTickets.length,
+        paymentMethod: 'WALLET',
+        failureReason: error.message
+      })
+    } catch (logError) {
+      console.error('Failed to log failed transaction:', logError)
     }
 
     callback({

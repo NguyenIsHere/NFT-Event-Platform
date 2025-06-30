@@ -105,6 +105,196 @@ async function GetEventDashboard (call, callback) {
         ? ((confirmedTransactions / totalTransactions) * 100).toFixed(2)
         : '0.00'
 
+    // ✅ NEW: Purchase flow analysis từ TransactionLog
+    const purchaseFlow = await TransactionLog.aggregate([
+      {
+        $match: {
+          eventId: event_id,
+          type: 'TICKET_PURCHASE',
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+          avgCompletionTime: { $avg: '$metadata.completion_time_ms' }
+        }
+      }
+    ])
+
+    // ✅ NEW: Recent transactions for timeline
+    const recentTransactions = await TransactionLog.find({
+      eventId: event_id,
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Last 24h
+    })
+      .sort({ createdAt: -1 })
+      .limit(20)
+
+    // ✅ NEW: Revenue by ticket type
+    const revenueByTicketType = await TransactionLog.aggregate([
+      {
+        $match: {
+          eventId: event_id,
+          type: 'TICKET_PURCHASE',
+          status: 'CONFIRMED'
+        }
+      },
+      {
+        $group: {
+          _id: '$ticketTypeId',
+          revenue_wei: { $sum: { $toLong: '$amountWei' } },
+          tickets_sold: { $sum: { $toInt: '$metadata.quantity' } }
+        }
+      }
+    ])
+
+    // ✅ NEW: Revenue by hour
+    const revenueByHour = await TransactionLog.aggregate([
+      {
+        $match: {
+          eventId: event_id,
+          type: 'TICKET_PURCHASE',
+          status: 'CONFIRMED'
+        }
+      },
+      {
+        $group: {
+          _id: { $hour: '$createdAt' },
+          revenue_wei: { $sum: { $toLong: '$amountWei' } },
+          transaction_count: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ])
+
+    // ✅ NEW: Payment method analysis từ TransactionLog
+    const paymentMethodAnalysis = await TransactionLog.aggregate([
+      {
+        $match: {
+          eventId: event_id,
+          type: 'TICKET_PURCHASE',
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            paymentMethod: { $ifNull: ['$metadata.paymentMethod', 'WALLET'] },
+            status: '$status'
+          },
+          count: { $sum: 1 },
+          totalAmount: { $sum: { $toLong: '$amountWei' } },
+          avgGasUsed: { $avg: { $toDouble: '$gasUsed' } },
+          avgGasPrice: { $avg: { $toDouble: '$gasPriceWei' } }
+        }
+      },
+      {
+        $group: {
+          _id: '$_id.paymentMethod',
+          totalTransactions: { $sum: '$count' },
+          confirmedTransactions: {
+            $sum: {
+              $cond: [{ $eq: ['$_id.status', 'CONFIRMED'] }, '$count', 0]
+            }
+          },
+          failedTransactions: {
+            $sum: {
+              $cond: [{ $eq: ['$_id.status', 'FAILED'] }, '$count', 0]
+            }
+          },
+          totalRevenue: { $sum: '$totalAmount' },
+          avgGasUsed: { $avg: '$avgGasUsed' },
+          avgGasPrice: { $avg: '$avgGasPrice' }
+        }
+      }
+    ])
+
+    // ✅ NEW: Gas analysis
+    const gasAnalysis = await TransactionLog.aggregate([
+      {
+        $match: {
+          eventId: event_id,
+          type: 'TICKET_PURCHASE',
+          status: 'CONFIRMED',
+          gasUsed: { $exists: true, $ne: null, $ne: '' },
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          avgGasUsed: { $avg: { $toDouble: '$gasUsed' } },
+          maxGasUsed: { $max: { $toDouble: '$gasUsed' } },
+          minGasUsed: { $min: { $toDouble: '$gasUsed' } },
+          avgGasPriceGwei: {
+            $avg: {
+              $divide: [{ $toDouble: '$gasPriceWei' }, 1000000000] // Convert Wei to Gwei
+            }
+          },
+          totalGasCostWei: {
+            $sum: {
+              $multiply: [
+                { $toDouble: '$gasUsed' },
+                { $toDouble: '$gasPriceWei' }
+              ]
+            }
+          }
+        }
+      }
+    ])
+
+    // ✅ NEW: Failure analysis
+    const failureAnalysis = await TransactionLog.aggregate([
+      {
+        $match: {
+          eventId: event_id,
+          type: 'TICKET_PURCHASE',
+          status: 'FAILED',
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: { $ifNull: ['$failureReason', 'Unknown Error'] },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { count: -1 } },
+      { $limit: 10 }
+    ])
+
+    // ✅ Transform payment method data
+    const paymentMethods = paymentMethodAnalysis.map(pm => ({
+      name: pm._id || 'Wallet',
+      type: pm._id === 'CREDIT_CARD' ? 'CREDIT_CARD' : 'WALLET',
+      count: pm.totalTransactions,
+      success_rate:
+        pm.totalTransactions > 0
+          ? ((pm.confirmedTransactions / pm.totalTransactions) * 100).toFixed(1)
+          : '0.0'
+    }))
+
+    // ✅ Gas analysis data
+    const gasData = gasAnalysis[0] || {}
+    const gasAnalysisResult = {
+      avg_gas_used: gasData.avgGasUsed
+        ? Math.round(gasData.avgGasUsed).toString()
+        : 'N/A',
+      avg_gas_price_gwei: gasData.avgGasPriceGwei
+        ? gasData.avgGasPriceGwei.toFixed(2)
+        : 'N/A',
+      total_gas_cost_eth: gasData.totalGasCostWei
+        ? (gasData.totalGasCostWei / Math.pow(10, 18)).toFixed(6)
+        : 'N/A'
+    }
+
+    // ✅ Failure reasons
+    const failureReasons = failureAnalysis.map(failure => ({
+      reason: failure._id,
+      count: failure.count
+    }))
+
     const dashboard = {
       event_id,
       date_range: {
@@ -112,36 +302,110 @@ async function GetEventDashboard (call, callback) {
         end_date: Math.floor(endDate.getTime() / 1000)
       },
       ticket_summary: {
-        total_tickets: ticketStats.reduce((sum, stat) => sum + stat.count, 0),
+        total_tickets: await Ticket.countDocuments({ eventId: event_id }),
         by_status: ticketStats.map(stat => ({
           status: stat._id,
           count: stat.count
         }))
       },
+
       purchase_summary: {
         total_purchases: totalTransactions,
+        conversion_rate: conversionRate,
+        abandonment_rate: (100 - parseFloat(conversionRate)).toFixed(2),
         by_status: purchaseStats.map(stat => ({
           status: stat._id,
           count: stat.count,
           total_quantity: stat.totalQuantity || 0,
-          total_value_wei: (stat.totalAmountWei || 0).toString()
-        })),
-        conversion_rate: conversionRate
+          total_value_wei: stat.totalAmountWei?.toString() || '0'
+        }))
       },
+
       revenue_summary: {
         total_revenue_wei: totalRevenue.toString(),
         platform_fees_wei: platformFee.toString(),
         organizer_revenue_wei: organizerRevenue.toString(),
         transaction_count: confirmedTransactions
       },
-      daily_trends: dailySales.map(day => ({
-        date: `${day._id.year}-${day._id.month
+
+      daily_trends: dailySales.map(sale => ({
+        date: `${sale._id.year}-${sale._id.month
           .toString()
-          .padStart(2, '0')}-${day._id.day.toString().padStart(2, '0')}`,
-        tickets_sold: day.ticketsSold,
-        purchase_count: day.transactionCount,
-        revenue_wei: day.revenue.toString()
+          .padStart(2, '0')}-${sale._id.day.toString().padStart(2, '0')}`,
+        tickets_sold: sale.ticketsSold,
+        purchase_count: sale.transactionCount,
+        revenue_wei: sale.revenue.toString()
+      })),
+
+      // ✅ FIX: Correct field names and data structure
+      purchase_flow: purchaseFlow.map(pf => ({
+        status: pf._id,
+        count: pf.count,
+        avg_completion_time_ms: Math.round(pf.avgCompletionTime || 0)
+      })),
+
+      recent_transactions: recentTransactions.map(tx => ({
+        id: tx._id.toString(),
+        type: tx.type,
+        status: tx.status,
+        created_at: tx.createdAt.toISOString(),
+        description: tx.description || 'No description',
+        amount_wei: tx.amountWei || '0',
+        transaction_hash: tx.transactionHash || ''
+      })),
+
+      revenue_by_ticket_type: revenueByTicketType.map(r => ({
+        ticket_type_id: r._id?.toString() || '',
+        name: `Type ${r._id?.toString().substring(0, 8) || 'Unknown'}...`,
+        revenue_wei: r.revenue_wei?.toString() || '0',
+        tickets_sold: r.tickets_sold || 0
+      })),
+
+      revenue_by_hour: revenueByHour.map(r => ({
+        hour: r._id || 0,
+        revenue_wei: r.revenue_wei?.toString() || '0',
+        transaction_count: r.transaction_count || 0
+      })),
+
+      payment_methods: paymentMethods.map(pm => ({
+        name: pm.name || pm._id || 'Unknown',
+        type: pm.type || pm._id || 'WALLET',
+        count: pm.count || 0,
+        success_rate: pm.success_rate?.toString() || '0.0'
+      })),
+
+      gas_analysis: {
+        avg_gas_used: gasAnalysisResult.avg_gas_used || 'N/A',
+        avg_gas_price_gwei: gasAnalysisResult.avg_gas_price_gwei || 'N/A',
+        total_gas_cost_eth: gasAnalysisResult.total_gas_cost_eth || 'N/A'
+      },
+
+      failure_reasons: failureReasons.map(fr => ({
+        reason: fr._id || 'Unknown',
+        count: fr.count || 0
       }))
+    }
+
+    // ✅ DEBUG: Log the actual structure being sent
+    console.log('📊 Dashboard structure check:', {
+      purchase_flow_length: dashboard.purchase_flow?.length,
+      recent_transactions_length: dashboard.recent_transactions?.length,
+      revenue_by_ticket_type_length: dashboard.revenue_by_ticket_type?.length,
+      revenue_by_hour_length: dashboard.revenue_by_hour?.length,
+      payment_methods_length: dashboard.payment_methods?.length,
+      has_gas_analysis: !!dashboard.gas_analysis,
+      failure_reasons_length: dashboard.failure_reasons?.length
+    })
+
+    // ✅ DEBUG: Log first few items of each array
+    if (dashboard.purchase_flow?.length > 0) {
+      console.log('📊 Sample purchase_flow:', dashboard.purchase_flow[0])
+    }
+    if (dashboard.recent_transactions?.length > 0) {
+      console.log(
+        '📊 Sample recent_transaction:',
+        dashboard.recent_transactions[0]
+      )
     }
 
     callback(null, dashboard)

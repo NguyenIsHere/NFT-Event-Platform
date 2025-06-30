@@ -330,7 +330,7 @@ routes:
     plugins:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
-
+  
   - name: checkin-analytics-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/events/[^/]+/analytics/checkin$"]

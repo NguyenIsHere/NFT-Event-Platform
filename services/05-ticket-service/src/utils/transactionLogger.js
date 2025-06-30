@@ -11,8 +11,6 @@ class TransactionLogger {
   static async logTicketPurchase ({
     transactionHash,
     blockNumber,
-    gasUsed,
-    gasPriceWei,
     eventId,
     organizerId,
     userId,
@@ -25,7 +23,12 @@ class TransactionLogger {
     feePercentAtTime,
     purchaseId, // ✅ CHANGE: ticket_order_id thay vì purchase ID
     ticketIds,
-    quantity
+    quantity,
+    paymentMethod = 'WALLET', // ✅ NEW: Payment method
+    gasUsed,
+    gasPriceWei,
+    failureReason,
+    purchaseStartTime
   }) {
     try {
       // ✅ GET current fee từ contract nếu không có
@@ -63,8 +66,6 @@ class TransactionLogger {
       const log = new TransactionLog({
         transactionHash: transactionHash || `pending-${Date.now()}`,
         blockNumber,
-        gasUsed,
-        gasPriceWei,
         type: TRANSACTION_TYPES[0], // TICKET_PURCHASE
         status: transactionHash ? 'CONFIRMED' : 'PENDING',
         eventId,
@@ -79,10 +80,17 @@ class TransactionLogger {
         feePercentAtTime,
         relatedPurchaseId: purchaseId, // ✅ CHANGE: ticket_order_id
         relatedTicketIds: ticketIds,
+        gasUsed: gasUsed?.toString(),
+        gasPriceWei: gasPriceWei?.toString(),
+        failureReason,
         metadata: {
           quantity,
           ticketCount: ticketIds?.length || 0,
-          orderType: 'TICKET_PURCHASE'
+          orderType: 'TICKET_PURCHASE',
+          paymentMethod, // ✅ NEW: Store payment method
+          completion_time_ms: transactionHash
+            ? Date.now() - (purchaseStartTime || Date.now())
+            : null
         },
         description: `${
           transactionHash ? 'Purchased' : 'Initiated purchase of'
