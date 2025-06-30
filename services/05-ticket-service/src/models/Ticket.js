@@ -108,6 +108,11 @@ const ticketSchema = new Schema(
     seatInfo: {
       type: seatInfoSchema,
       required: false
+    },
+    metadata: {
+      type: Map,
+      of: Schema.Types.Mixed,
+      default: {}
     }
   },
   {

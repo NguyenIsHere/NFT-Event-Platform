@@ -262,15 +262,6 @@ routes:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
-  - name: purchase-analytics-route-v1
-    service: ticket-grpc-service
-    paths: ["~/v1/events/[^/]+/analytics/purchase$"]
-    methods: [GET]
-    strip_path: false
-    plugins:
-      - name: jwt
-        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }     
-
   - name: ticket-list-all-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/tickets/all$"]
@@ -340,15 +331,6 @@ routes:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
-  - name: organizer-analytics-route-v1
-    service: ticket-grpc-service
-    paths: ["~/v1/organizers/[^/]+/analytics$"]
-    methods: [GET]
-    strip_path: false
-    plugins:
-      - name: jwt
-        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
-
   - name: checkin-analytics-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/events/[^/]+/analytics/checkin$"]
@@ -375,6 +357,25 @@ routes:
     paths: ["~/v1/tickets/my-tickets/(?<owner_address>[^/]+)/details$"]
     methods: [GET]
     strip_path: false
+
+# ✅ NEW: Admin analytics routes
+  - name: admin-analytics-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/admin/analytics$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: organizer-analytics-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/organizers/(?<organizer_id>[^/]+)/analytics$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
   # === SeatMap Service Routes ===
   - name: seatmap-create-for-event-route-v1

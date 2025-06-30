@@ -138,12 +138,6 @@ service TicketService {
     };
   }
 
-  rpc GetPurchaseAnalytics(GetPurchaseAnalyticsRequest) returns (GetPurchaseAnalyticsResponse) {
-    option (google.api.http) = {
-      get: "/v1/events/{event_id}/analytics/purchase"
-    };
-  }
-
   rpc GetSoldSeatsByEvent(GetSoldSeatsByEventRequest) returns (GetSoldSeatsByEventResponse) {
     option (google.api.http) = {
       get: "/v1/tickets/sold-seats/event/{event_id}"
@@ -157,46 +151,24 @@ service TicketService {
   }
 
   rpc GetMyTicketsWithDetails(GetMyTicketsWithDetailsRequest) returns (GetMyTicketsWithDetailsResponse) {
-  option (google.api.http) = {
-    get: "/v1/tickets/my-tickets/{owner_address}/details"
-  };
-}
-}
-
-// THÊM Settlement Service
-service SettlementService {
-  rpc GetEventSettlementSummary(GetEventSettlementSummaryRequest) returns (GetEventSettlementSummaryResponse) {
     option (google.api.http) = {
-      get: "/v1/settlements/events/{event_id}/summary"
+      get: "/v1/tickets/my-tickets/{owner_address}/details"
     };
   }
 
-  rpc ProcessEventSettlement(ProcessEventSettlementRequest) returns (ProcessEventSettlementResponse) {
+  // ✅ NEW: Admin Analytics
+  rpc GetAdminAnalytics(GetAdminAnalyticsRequest) returns (GetAdminAnalyticsResponse) {
     option (google.api.http) = {
-      post: "/v1/settlements/events/{event_id}/process"
-      body: "*"
+      get: "/v1/admin/analytics"
     };
   }
 
-  rpc ListPlatformTransactions(ListPlatformTransactionsRequest) returns (ListPlatformTransactionsResponse) {
+  // ✅ NEW: Organizer Analytics  
+  rpc GetOrganizerAnalytics(GetOrganizerAnalyticsRequest) returns (GetOrganizerAnalyticsResponse) {
     option (google.api.http) = {
-      get: "/v1/settlements/transactions"
+      get: "/v1/organizers/{organizer_id}/analytics"
     };
   }
-}
-
-message GetPurchaseAnalyticsRequest {
-  string event_id = 1;
-  string time_period = 2; // TODAY, WEEK, MONTH, ALL
-}
-
-message GetPurchaseAnalyticsResponse {
-  string event_id = 1;
-  string time_period = 2;
-  repeated HourlyPurchase hourly_purchases = 3;
-  double avg_purchase_quantity = 4;
-  string avg_purchase_value_wei = 5;
-  repeated PurchaseFlowStep purchase_flow = 6;
 }
 
 message HourlyPurchase {
@@ -485,67 +457,6 @@ message DailySale {
   string revenue_wei = 4; // ✅ NEW: Revenue per day
 }
 
-// Settlement Messages (unchanged)
-message GetEventSettlementSummaryRequest {
-  string event_id = 1;
-}
-
-message SettlementSummary {
-  int32 count = 1;
-  string total_amount_wei = 2;
-  string total_platform_fee_wei = 3;
-  string total_organizer_amount_wei = 4;
-}
-
-message GetEventSettlementSummaryResponse {
-  string event_id = 1;
-  SettlementSummary received_summary = 2;
-  SettlementSummary settled_summary = 3;
-}
-
-message ProcessEventSettlementRequest {
-  string event_id = 1;
-  string settlement_transaction_hash = 2;
-}
-
-message ProcessEventSettlementResponse {
-  bool success = 1;
-  string event_id = 2;
-  int32 settled_transactions_count = 3;
-  string total_organizer_amount_wei = 4;
-  string total_platform_fee_wei = 5;
-  string settlement_transaction_hash = 6;
-}
-
-message PlatformTransaction {
-  string id = 1;
-  string transaction_hash = 2;
-  string ticket_order_id = 3;
-  string event_id = 4;
-  string event_organizer_id = 5;
-  string buyer_address = 6;
-  string amount_wei = 7;
-  string platform_fee_wei = 8;
-  string organizer_amount_wei = 9;
-  int32 platform_fee_percent = 10;
-  string status = 11;
-  int64 created_at = 12;
-  int64 settled_at = 13;
-  string settlement_transaction_hash = 14;
-}
-
-message ListPlatformTransactionsRequest {
-  string event_id = 1;
-  string status_filter = 2;
-  int32 page_size = 3;
-  string page_token = 4;
-}
-
-message ListPlatformTransactionsResponse {
-  repeated PlatformTransaction transactions = 1;
-  string next_page_token = 2;
-}
-
 message GetSoldSeatsByEventRequest {
   string event_id = 1;
 }
@@ -647,5 +558,68 @@ message SessionDetails {
   string name = 2;
   int64 start_time = 3;
   int64 end_time = 4;
+}
+
+// ✅ NEW: Admin Analytics Messages
+message GetAdminAnalyticsRequest {
+  DateRange date_range = 1;
+  string transaction_type = 2; // Optional filter: "TICKET_PURCHASE", "REVENUE_SETTLEMENT", etc.
+}
+
+message GetAdminAnalyticsResponse {
+  DateRange date_range = 1;
+  repeated TransactionSummary transaction_summary = 2;
+  repeated DailyTrend daily_trends = 3;
+  repeated TopEventByRevenue top_events_by_revenue = 4;
+}
+
+message TransactionSummary {
+  string type = 1;
+  int32 count = 2;
+  string total_amount_wei = 3;
+  string total_platform_fee_wei = 4;
+  string total_organizer_amount_wei = 5;
+}
+
+message DailyTrend {
+  string date = 1; // YYYY-MM-DD
+  string type = 2;
+  int32 count = 3;
+  string total_amount_wei = 4;
+}
+
+message TopEventByRevenue {
+  string event_id = 1;
+  int32 tickets_sold = 2;
+  string total_revenue_wei = 3;
+  string organizer_revenue_wei = 4;
+  string platform_fees_wei = 5;
+}
+
+// ✅ NEW: Organizer Analytics Messages
+message GetOrganizerAnalyticsRequest {
+  string organizer_id = 1;
+  DateRange date_range = 2;
+}
+
+message GetOrganizerAnalyticsResponse {
+  string organizer_id = 1;
+  DateRange date_range = 2;
+  repeated OrganizerTransactionSummary transaction_summary = 3;
+  repeated OrganizerEventBreakdown event_breakdown = 4;
+}
+
+message OrganizerTransactionSummary {
+  string type = 1;
+  int32 count = 2;
+  string total_revenue_wei = 3;
+  int32 tickets_sold = 4;
+}
+
+message OrganizerEventBreakdown {
+  string event_id = 1;
+  int32 tickets_sold = 2;
+  string total_revenue_wei = 3;
+  string platform_fees_paid_wei = 4;
 }
 
