@@ -29,6 +29,8 @@ service BlockchainService {
 
   // (Tùy chọn) Phân tích logs của một giao dịch để lấy thông tin chi tiết
   rpc ParseTransactionLogs(ParseTransactionLogsRequest) returns (ParseTransactionLogsResponse);
+
+  rpc VerifyTokenOwnership(VerifyTokenOwnershipRequest) returns (VerifyTokenOwnershipResponse);
 }
 
 // ----- Messages -----
@@ -110,4 +112,17 @@ message RegisterEventOnBlockchainRequest {
   string system_event_id_for_ref = 1;
   string blockchain_event_id = 2;
   string event_name = 3; // ✅ ADD: Event name
+}
+
+// ✅ NEW: Messages for ownership verification
+message VerifyTokenOwnershipRequest {
+  string token_id = 1;
+  string expected_owner = 2;
+}
+
+message VerifyTokenOwnershipResponse {
+  bool is_valid_owner = 1;
+  string actual_owner = 2;
+  string expected_owner = 3;
+  string reason = 4;
 }

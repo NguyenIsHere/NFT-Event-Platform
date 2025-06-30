@@ -614,11 +614,78 @@ async function ParseTransactionLogs (call, callback) {
   }
 }
 
+async function VerifyTokenOwnership (call, callback) {
+  const { token_id, expected_owner } = call.request
+
+  console.log(
+    `VerifyTokenOwnership called for token ${token_id}, expected owner: ${expected_owner}`
+  )
+
+  try {
+    if (!token_id || token_id === '0') {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid token ID'
+      })
+    }
+
+    if (!expected_owner || !expected_owner.startsWith('0x')) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid expected owner address'
+      })
+    }
+
+    const tokenIdBN = BigInt(token_id)
+
+    // Check if token exists
+    let actualOwner
+    try {
+      actualOwner = await eventTicketNFTContract.ownerOf(tokenIdBN)
+    } catch (contractError) {
+      console.error(
+        `Token ${token_id} does not exist or error querying:`,
+        contractError
+      )
+      return callback(null, {
+        is_valid_owner: false,
+        actual_owner: '',
+        expected_owner: expected_owner,
+        reason: 'Token does not exist or is not minted'
+      })
+    }
+
+    const isValidOwner =
+      actualOwner.toLowerCase() === expected_owner.toLowerCase()
+
+    console.log(`Ownership verification result:`, {
+      tokenId: token_id,
+      expectedOwner: expected_owner,
+      actualOwner: actualOwner,
+      isValid: isValidOwner
+    })
+
+    callback(null, {
+      is_valid_owner: isValidOwner,
+      actual_owner: actualOwner,
+      expected_owner: expected_owner,
+      reason: isValidOwner ? 'Owner verified' : 'Owner mismatch'
+    })
+  } catch (error) {
+    console.error('VerifyTokenOwnership error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to verify token ownership'
+    })
+  }
+}
+
 module.exports = {
   RegisterEventOnBlockchain,
   RegisterTicketTypeOnBlockchain,
   GetTicketPaymentDetails,
-  MintTicket, // Giữ lại cho admin mint nếu cần
+  MintTicket,
   VerifyTransaction,
-  ParseTransactionLogs // Thêm method mới
+  ParseTransactionLogs,
+  VerifyTokenOwnership
 }

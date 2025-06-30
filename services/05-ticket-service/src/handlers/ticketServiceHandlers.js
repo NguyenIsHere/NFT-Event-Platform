@@ -891,12 +891,196 @@ async function GenerateQRCode (call, callback) {
   }
 }
 
-// Thêm handler cho CheckIn
 // ✅ THÊM: Check-in với validation thời gian session
+// async function CheckIn (call, callback) {
+//   const { qr_code_data, location, scanner_id } = call.request
+
+//   console.log(`TicketService: CheckIn called with scanner: ${scanner_id}`)
+
+//   try {
+//     // Parse QR code data
+//     let qrData
+//     try {
+//       qrData = JSON.parse(qr_code_data)
+//     } catch (error) {
+//       return callback({
+//         code: grpc.status.INVALID_ARGUMENT,
+//         message: 'Invalid QR code format'
+//       })
+//     }
+
+//     // Tìm ticket bằng QR code data
+//     const ticket = await Ticket.findOne({ qrCodeData: qr_code_data })
+//     if (!ticket) {
+//       return callback({
+//         code: grpc.status.NOT_FOUND,
+//         message: 'Ticket not found'
+//       })
+//     }
+
+//     // Verify QR code signature
+//     const verification = verifyQRCodeData(qr_code_data, ticket.qrCodeSecret)
+//     if (!verification.valid) {
+//       return callback({
+//         code: grpc.status.INVALID_ARGUMENT,
+//         message: `Invalid QR code: ${verification.reason}`
+//       })
+//     }
+
+//     console.log(`✅ QR code verified successfully for ticket: ${ticket.id}`)
+
+//     // Kiểm tra ticket status
+//     if (ticket.status !== TICKET_STATUS_ENUM[4]) {
+//       // MINTED
+//       return callback({
+//         code: grpc.status.FAILED_PRECONDITION,
+//         message: `Cannot check-in ticket with status: ${ticket.status}`
+//       })
+//     }
+
+//     // ✅ FIX: Lấy thông tin event và session để validate thời gian
+//     let eventData = null
+//     try {
+//       const eventResponse = await new Promise((resolve, reject) => {
+//         eventServiceClient.GetEvent(
+//           { event_id: ticket.eventId },
+//           (err, response) => {
+//             if (err) reject(err)
+//             else resolve(response)
+//           }
+//         )
+//       })
+//       eventData = eventResponse.event
+//     } catch (eventError) {
+//       console.warn(
+//         'Could not fetch event data for check-in validation:',
+//         eventError
+//       )
+//       return callback({
+//         code: grpc.status.INTERNAL,
+//         message: 'Cannot validate event details for check-in'
+//       })
+//     }
+
+//     // ✅ FIX: Validate check-in timing dựa trên session
+//     const now = Date.now()
+//     let relevantSession = null
+
+//     if (eventData && eventData.sessions && eventData.sessions.length > 0) {
+//       // Find the specific session for this ticket
+//       if (ticket.sessionId) {
+//         relevantSession = eventData.sessions.find(
+//           s => s.id === ticket.sessionId
+//         )
+//       }
+
+//       // Fallback to earliest session if specific session not found
+//       if (!relevantSession) {
+//         relevantSession = eventData.sessions.reduce((earliest, current) =>
+//           current.start_time < earliest.start_time ? current : earliest
+//         )
+//       }
+
+//       if (relevantSession) {
+//         const sessionStartTime =
+//           relevantSession.start_time < 10000000000
+//             ? relevantSession.start_time * 1000
+//             : relevantSession.start_time
+
+//         const sessionEndTime =
+//           relevantSession.end_time < 10000000000
+//             ? relevantSession.end_time * 1000
+//             : relevantSession.end_time
+
+//         // ✅ FIX: Check-in window validation
+//         const checkInWindowStart = sessionStartTime - 2 * 60 * 60 * 1000 // 2 giờ trước event
+//         const checkInWindowEnd = sessionEndTime // Đến khi event kết thúc
+
+//         console.log('🔍 Check-in timing validation:', {
+//           now: new Date(now).toISOString(),
+//           sessionStart: new Date(sessionStartTime).toISOString(),
+//           sessionEnd: new Date(sessionEndTime).toISOString(),
+//           checkInWindowStart: new Date(checkInWindowStart).toISOString(),
+//           checkInWindowEnd: new Date(checkInWindowEnd).toISOString(),
+//           canCheckIn: now >= checkInWindowStart && now <= checkInWindowEnd
+//         })
+
+//         // Kiểm tra xem có trong thời gian cho phép check-in không
+//         if (now < checkInWindowStart) {
+//           return callback({
+//             code: grpc.status.FAILED_PRECONDITION,
+//             message: `Check-in chưa mở. Bạn có thể check-in từ ${new Date(
+//               checkInWindowStart
+//             ).toLocaleString('vi-VN')}`
+//           })
+//         }
+
+//         if (now > checkInWindowEnd) {
+//           return callback({
+//             code: grpc.status.FAILED_PRECONDITION,
+//             message: `Sự kiện đã kết thúc. Không thể check-in sau ${new Date(
+//               checkInWindowEnd
+//             ).toLocaleString('vi-VN')}`
+//           })
+//         }
+//       }
+//     }
+
+//     // Kiểm tra expiry time của ticket
+//     if (ticket.expiryTime && new Date() > ticket.expiryTime) {
+//       return callback({
+//         code: grpc.status.FAILED_PRECONDITION,
+//         message: 'Ticket has expired'
+//       })
+//     }
+
+//     // Kiểm tra đã check-in chưa
+//     if (ticket.checkInStatus === 'CHECKED_IN') {
+//       return callback({
+//         code: grpc.status.ALREADY_EXISTS,
+//         message: `Ticket already checked in at ${
+//           ticket.checkInTime
+//             ? new Date(ticket.checkInTime).toLocaleString('vi-VN')
+//             : 'unknown time'
+//         }`
+//       })
+//     }
+
+//     // ✅ FIX: Thực hiện check-in với session info
+//     ticket.checkInStatus = 'CHECKED_IN'
+//     ticket.checkInTime = new Date()
+//     ticket.checkInLocation = location || 'Unknown'
+
+//     await ticket.save()
+
+//     console.log(
+//       `✅ Ticket ${ticket.id} checked in successfully at ${ticket.checkInTime}`
+//     )
+
+//     // ✅ FIX: Return detailed response
+//     callback(null, {
+//       success: true,
+//       message: 'Check-in thành công',
+//       ticket: ticketDocumentToGrpcTicket(ticket),
+//       session_info: relevantSession
+//         ? {
+//             session_name: relevantSession.name,
+//             session_start: relevantSession.start_time,
+//             session_end: relevantSession.end_time
+//           }
+//         : null
+//     })
+//   } catch (error) {
+//     console.error('TicketService: CheckIn error:', error)
+//     callback({
+//       code: grpc.status.INTERNAL,
+//       message: error.message || 'Check-in failed'
+//     })
+//   }
+// }
+
 async function CheckIn (call, callback) {
   const { qr_code_data, location, scanner_id } = call.request
-
-  console.log(`TicketService: CheckIn called with scanner: ${scanner_id}`)
 
   try {
     // Parse QR code data
@@ -928,151 +1112,86 @@ async function CheckIn (call, callback) {
       })
     }
 
-    console.log(`✅ QR code verified successfully for ticket: ${ticket.id}`)
+    // ✅ NEW: Verify blockchain ownership
+    if (ticket.tokenId && ticket.tokenId !== '0') {
+      console.log(
+        `🔍 Verifying blockchain ownership for token ${ticket.tokenId}`
+      )
 
-    // Kiểm tra ticket status
+      try {
+        const ownershipResponse = await new Promise((resolve, reject) => {
+          blockchainServiceClient.VerifyTokenOwnership(
+            {
+              token_id: ticket.tokenId,
+              expected_owner: ticket.ownerAddress
+            },
+            (err, res) => {
+              if (err) reject(err)
+              else resolve(res)
+            }
+          )
+        })
+
+        if (!ownershipResponse.is_valid_owner) {
+          console.error(`❌ Ownership verification failed:`, {
+            tokenId: ticket.tokenId,
+            expectedOwner: ticket.ownerAddress,
+            actualOwner: ownershipResponse.actual_owner,
+            reason: ownershipResponse.reason
+          })
+
+          return callback({
+            code: grpc.status.FAILED_PRECONDITION,
+            message: `Ownership verification failed: ${
+              ownershipResponse.reason || 'Token owner mismatch'
+            }`
+          })
+        }
+
+        console.log(
+          `✅ Blockchain ownership verified for token ${ticket.tokenId}`
+        )
+      } catch (blockchainError) {
+        console.error('❌ Blockchain ownership check failed:', blockchainError)
+        return callback({
+          code: grpc.status.INTERNAL,
+          message: 'Failed to verify token ownership on blockchain'
+        })
+      }
+    } else {
+      console.warn(
+        `⚠️ Ticket ${ticket.id} has no tokenId, skipping blockchain verification`
+      )
+    }
+
+    // Rest of existing check-in logic...
     if (ticket.status !== TICKET_STATUS_ENUM[4]) {
-      // MINTED
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
         message: `Cannot check-in ticket with status: ${ticket.status}`
       })
     }
 
-    // ✅ FIX: Lấy thông tin event và session để validate thời gian
-    let eventData = null
-    try {
-      const eventResponse = await new Promise((resolve, reject) => {
-        eventServiceClient.GetEvent(
-          { event_id: ticket.eventId },
-          (err, response) => {
-            if (err) reject(err)
-            else resolve(response)
-          }
-        )
-      })
-      eventData = eventResponse.event
-    } catch (eventError) {
-      console.warn(
-        'Could not fetch event data for check-in validation:',
-        eventError
-      )
-      return callback({
-        code: grpc.status.INTERNAL,
-        message: 'Cannot validate event details for check-in'
-      })
-    }
-
-    // ✅ FIX: Validate check-in timing dựa trên session
-    const now = Date.now()
-    let relevantSession = null
-
-    if (eventData && eventData.sessions && eventData.sessions.length > 0) {
-      // Find the specific session for this ticket
-      if (ticket.sessionId) {
-        relevantSession = eventData.sessions.find(
-          s => s.id === ticket.sessionId
-        )
-      }
-
-      // Fallback to earliest session if specific session not found
-      if (!relevantSession) {
-        relevantSession = eventData.sessions.reduce((earliest, current) =>
-          current.start_time < earliest.start_time ? current : earliest
-        )
-      }
-
-      if (relevantSession) {
-        const sessionStartTime =
-          relevantSession.start_time < 10000000000
-            ? relevantSession.start_time * 1000
-            : relevantSession.start_time
-
-        const sessionEndTime =
-          relevantSession.end_time < 10000000000
-            ? relevantSession.end_time * 1000
-            : relevantSession.end_time
-
-        // ✅ FIX: Check-in window validation
-        const checkInWindowStart = sessionStartTime - 2 * 60 * 60 * 1000 // 2 giờ trước event
-        const checkInWindowEnd = sessionEndTime // Đến khi event kết thúc
-
-        console.log('🔍 Check-in timing validation:', {
-          now: new Date(now).toISOString(),
-          sessionStart: new Date(sessionStartTime).toISOString(),
-          sessionEnd: new Date(sessionEndTime).toISOString(),
-          checkInWindowStart: new Date(checkInWindowStart).toISOString(),
-          checkInWindowEnd: new Date(checkInWindowEnd).toISOString(),
-          canCheckIn: now >= checkInWindowStart && now <= checkInWindowEnd
-        })
-
-        // Kiểm tra xem có trong thời gian cho phép check-in không
-        if (now < checkInWindowStart) {
-          return callback({
-            code: grpc.status.FAILED_PRECONDITION,
-            message: `Check-in chưa mở. Bạn có thể check-in từ ${new Date(
-              checkInWindowStart
-            ).toLocaleString('vi-VN')}`
-          })
-        }
-
-        if (now > checkInWindowEnd) {
-          return callback({
-            code: grpc.status.FAILED_PRECONDITION,
-            message: `Sự kiện đã kết thúc. Không thể check-in sau ${new Date(
-              checkInWindowEnd
-            ).toLocaleString('vi-VN')}`
-          })
-        }
-      }
-    }
-
-    // Kiểm tra expiry time của ticket
-    if (ticket.expiryTime && new Date() > ticket.expiryTime) {
-      return callback({
-        code: grpc.status.FAILED_PRECONDITION,
-        message: 'Ticket has expired'
-      })
-    }
-
-    // Kiểm tra đã check-in chưa
     if (ticket.checkInStatus === 'CHECKED_IN') {
       return callback({
         code: grpc.status.ALREADY_EXISTS,
-        message: `Ticket already checked in at ${
-          ticket.checkInTime
-            ? new Date(ticket.checkInTime).toLocaleString('vi-VN')
-            : 'unknown time'
-        }`
+        message: `Ticket already checked in`
       })
     }
 
-    // ✅ FIX: Thực hiện check-in với session info
+    // Perform check-in
     ticket.checkInStatus = 'CHECKED_IN'
     ticket.checkInTime = new Date()
     ticket.checkInLocation = location || 'Unknown'
-
     await ticket.save()
 
-    console.log(
-      `✅ Ticket ${ticket.id} checked in successfully at ${ticket.checkInTime}`
-    )
-
-    // ✅ FIX: Return detailed response
     callback(null, {
       success: true,
-      message: 'Check-in thành công',
-      ticket: ticketDocumentToGrpcTicket(ticket),
-      session_info: relevantSession
-        ? {
-            session_name: relevantSession.name,
-            session_start: relevantSession.start_time,
-            session_end: relevantSession.end_time
-          }
-        : null
+      message: 'Check-in successful with blockchain verification',
+      ticket: ticketDocumentToGrpcTicket(ticket)
     })
   } catch (error) {
-    console.error('TicketService: CheckIn error:', error)
+    console.error('CheckIn error:', error)
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Check-in failed'
