@@ -3,6 +3,7 @@ const { Event, EVENT_STATUS_ENUM } = require('../models/Event') // Import Event 
 const grpc = require('@grpc/grpc-js')
 const ipfsServiceClient = require('../clients/ipfsServiceClient')
 const blockchainServiceClient = require('../clients/blockchainServiceClient')
+const userServiceClient = require('../clients/userServiceClient')
 const mongoose = require('mongoose')
 const {
   ticketServiceClient,
@@ -311,6 +312,50 @@ async function PublishEvent (call, callback) {
       })
     }
 
+    // ✅ NEW: Get organizer wallet address from User service
+    let organizerWalletAddress = eventToPublish.organizerWalletAddress
+
+    if (!organizerWalletAddress) {
+      console.log(
+        `🔍 Getting organizer wallet address for organizerId: ${eventToPublish.organizerId}`
+      )
+
+      try {
+        const userResponse = await new Promise((resolve, reject) => {
+          // Assuming you have userServiceClient
+          userServiceClient.GetUserById(
+            { user_id: eventToPublish.organizerId },
+            (err, response) => {
+              if (err) reject(err)
+              else resolve(response)
+            }
+          )
+        })
+
+        if (userResponse && userResponse.wallet_address) {
+          organizerWalletAddress = userResponse.wallet_address
+
+          // ✅ Save wallet address to event for future use
+          eventToPublish.organizerWalletAddress = organizerWalletAddress
+          console.log(
+            `✅ Found organizer wallet address: ${organizerWalletAddress}`
+          )
+        } else {
+          return callback({
+            code: grpc.status.FAILED_PRECONDITION,
+            message:
+              'Organizer must have a wallet address connected to publish events'
+          })
+        }
+      } catch (userError) {
+        console.error('❌ Failed to get organizer wallet address:', userError)
+        return callback({
+          code: grpc.status.INTERNAL,
+          message: 'Cannot get organizer wallet address'
+        })
+      }
+    }
+
     if (
       eventToPublish.status !== EVENT_STATUS_ENUM[0] &&
       eventToPublish.status !== EVENT_STATUS_ENUM[5]
@@ -328,13 +373,14 @@ async function PublishEvent (call, callback) {
     eventToPublish.status = EVENT_STATUS_ENUM[1] // PENDING_PUBLISH
     await eventToPublish.save()
 
-    // ✅ FIX: Call RegisterEventOnBlockchain with proper data
+    // ✅ UPDATED: Call RegisterEventOnBlockchain with organizer address
     const bcResponse = await new Promise((resolve, reject) => {
       blockchainServiceClient.RegisterEventOnBlockchain(
         {
           system_event_id_for_ref: event_id,
           blockchain_event_id: desired_blockchain_event_id,
-          event_name: eventToPublish.name
+          event_name: eventToPublish.name,
+          organizer_address: eventToPublish.organizerWalletAddress // ✅ NEW: Pass organizer wallet address
         },
         { deadline: new Date(Date.now() + 30000) },
         (err, res) => {

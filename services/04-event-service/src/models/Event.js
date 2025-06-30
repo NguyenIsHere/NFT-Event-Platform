@@ -51,6 +51,13 @@ const eventSchema = new Schema(
       required: true,
       index: true
     },
+    organizerWalletAddress: {
+      // ✅ NEW: Store organizer wallet address
+      type: String,
+      required: false, // Optional vì có thể chưa có khi tạo event
+      trim: true,
+      lowercase: true
+    },
     name: {
       type: String,
       required: true,

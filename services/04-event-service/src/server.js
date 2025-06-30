@@ -12,6 +12,7 @@ const healthCheck = require('grpc-health-check')
 const HealthImplementation = healthCheck.HealthImplementation
 
 const eventServiceHandlers = require('./handlers/eventServiceHandlers')
+const eventStatusUpdater = require('./jobs/eventStatusUpdater')
 
 const SERVICE_TYPE = process.env.SERVICE_TYPE
 const PORT = process.env.PORT || 50054
@@ -183,6 +184,8 @@ async function main () {
           process.exit(0)
         }
       })
+      // ✅ START: Event status updater cron job
+      eventStatusUpdater.start()
     }
   )
 }

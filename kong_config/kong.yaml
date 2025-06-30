@@ -83,6 +83,25 @@ services:
         config:
           proto: /etc/kong/protos/chatbot.proto
 
+  - name: blockchain-grpc-service
+    host: blockchain-service.service.consul
+    port: 50056
+    protocol: grpc
+    connect_timeout: 60000
+    write_timeout: 60000
+    read_timeout: 60000
+    plugins:
+      - name: grpc-gateway
+        config:
+          proto: /etc/kong/protos/blockchain.proto
+      - name: response-transformer
+        config:
+          add:
+            headers:
+              - "Access-Control-Allow-Origin: *"
+              - "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS"
+              - "Access-Control-Allow-Headers: Content-Type, Authorization"
+
 # --- Routes ---
 routes:
   # === Auth Service Routes ===
@@ -407,6 +426,82 @@ routes:
     service: chatbot-grpc-service
     paths: ["~/v1/chat/history$"]
     methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  # ✅ === BLOCKCHAIN SERVICE ROUTES (NEW) ===
+  - name: blockchain-set-platform-fee-route-v1
+    service: blockchain-grpc-service
+    paths: ["~/v1/admin/platform/fee$"]
+    methods: [POST]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: blockchain-get-platform-fee-route-v1
+    service: blockchain-grpc-service
+    paths: ["~/v1/admin/platform/fee$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: blockchain-get-event-revenue-route-v1
+    service: blockchain-grpc-service
+    paths: ["~/v1/admin/events/(?<blockchain_event_id>[^/]+)/revenue$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: blockchain-settle-event-revenue-route-v1
+    service: blockchain-grpc-service
+    paths: ["~/v1/admin/events/(?<blockchain_event_id>[^/]+)/settle$"]
+    methods: [POST]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: blockchain-withdraw-platform-fees-route-v1
+    service: blockchain-grpc-service
+    paths: ["~/v1/admin/platform/withdraw$"]
+    methods: [POST]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  # ✅ === EVENT REVENUE MANAGEMENT ROUTES ===
+  - name: admin-event-revenue-summary-route-v1
+    service: event-grpc-service
+    paths: ["~/v1/admin/events/revenue-summary$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: admin-platform-stats-route-v1
+    service: event-grpc-service
+    paths: ["~/v1/admin/platform/stats$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: admin-platform-balance-route-v1
+    service: blockchain-grpc-service
+    paths:
+      - "/v1/admin/platform/balance"
+    methods:
+      - "GET"
     strip_path: false
     plugins:
       - name: jwt

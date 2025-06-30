@@ -6,6 +6,7 @@ const {
   eventTicketNFTContract,
   ethers
 } = require('../utils/contractUtils')
+const eventServiceClient = require('../clients/eventServiceClient')
 
 // Helper function để chờ giao dịch được mined và lấy receipt
 async function waitForTransaction (txResponse, confirmations = 1) {
@@ -123,19 +124,35 @@ async function prepareGasOptions () {
   return txOptions
 }
 
-// ✅ FIX: Register Event Only (no price/supply)
+// Update RegisterEventOnBlockchain to include organizer
+// Update RegisterEventOnBlockchain to include organizer
 async function RegisterEventOnBlockchain (call, callback) {
-  const { system_event_id_for_ref, blockchain_event_id, event_name } =
-    call.request
+  const {
+    system_event_id_for_ref,
+    blockchain_event_id,
+    event_name,
+    organizer_address
+  } = call.request
 
   try {
     const eventIdBN = BigInt(blockchain_event_id)
     const txOptions = await prepareGasOptions()
 
-    console.log(`Calling contract.createEvent(${eventIdBN}, "${event_name}")`)
+    // ✅ Validate organizer address
+    if (!organizer_address || !organizer_address.startsWith('0x')) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Valid organizer address is required'
+      })
+    }
+
+    console.log(
+      `Calling contract.createEvent(${eventIdBN}, "${event_name}", "${organizer_address}")`
+    )
     const tx = await eventTicketNFTContract.createEvent(
       eventIdBN,
       event_name,
+      organizer_address, // ✅ Pass organizer address
       txOptions
     )
 
@@ -151,6 +168,68 @@ async function RegisterEventOnBlockchain (call, callback) {
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to register event on blockchain'
+    })
+  }
+}
+
+// ✅ NEW: Set platform fee
+async function SetPlatformFee (call, callback) {
+  const { fee_percent } = call.request
+
+  console.log(`SetPlatformFee called for fee: ${fee_percent}%`)
+
+  try {
+    if (fee_percent > 30) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Fee percent cannot exceed 30%'
+      })
+    }
+
+    const txOptions = await prepareGasOptions()
+
+    // Get current fee first
+    const currentFee = await eventTicketNFTContract.getPlatformFeePercent()
+
+    console.log(`Setting platform fee from ${currentFee}% to ${fee_percent}%`)
+
+    const tx = await eventTicketNFTContract.setPlatformFeePercent(
+      fee_percent,
+      txOptions
+    )
+
+    const receipt = await waitForTransaction(tx)
+
+    callback(null, {
+      success: true,
+      transaction_hash: receipt.hash,
+      old_fee_percent: Number(currentFee),
+      new_fee_percent: fee_percent
+    })
+  } catch (error) {
+    console.error('SetPlatformFee error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to set platform fee'
+    })
+  }
+}
+
+// ✅ NEW: Get platform fee
+async function GetPlatformFee (call, callback) {
+  try {
+    const currentFee = await eventTicketNFTContract.getPlatformFeePercent()
+    const maxFee = await eventTicketNFTContract.MAX_PLATFORM_FEE()
+
+    callback(null, {
+      fee_percent: Number(currentFee),
+      max_fee_percent: Number(maxFee)
+    })
+  } catch (error) {
+    console.error('GetPlatformFee error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to get platform fee'
     })
   }
 }
@@ -680,6 +759,341 @@ async function VerifyTokenOwnership (call, callback) {
   }
 }
 
+async function SettleEventRevenue (call, callback) {
+  const { blockchain_event_id } = call.request
+
+  console.log(`SettleEventRevenue called for event: ${blockchain_event_id}`)
+
+  try {
+    const eventIdBN = BigInt(blockchain_event_id)
+    const txOptions = await prepareGasOptions()
+
+    // ✅ STEP 1: Get event revenue first
+    const revenueInfo = await eventTicketNFTContract.getEventRevenue(eventIdBN)
+    const [organizerRevenue, platformFees, settled, organizer] = revenueInfo
+
+    if (settled) {
+      const errorMessage = 'Event revenue already settled'
+      console.log(`❌ Settlement rejected: ${errorMessage}`)
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: errorMessage
+      })
+    }
+
+    if (organizerRevenue === 0n) {
+      const errorMessage = 'No revenue to settle for this event'
+      console.log(`❌ Settlement rejected: ${errorMessage}`)
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: errorMessage
+      })
+    }
+
+    // ✅ STEP 2: Get event details from event service to check if ended
+    console.log(`🔍 Fetching event details to validate settlement timing...`)
+
+    let eventDetails = null
+    try {
+      const eventsResponse = await new Promise((resolve, reject) => {
+        eventServiceClient.ListEvents(
+          {
+            page_size: 100,
+            status: 'ACTIVE'
+          },
+          { deadline: new Date(Date.now() + 10000) },
+          (err, response) => {
+            if (err) {
+              console.error('❌ Error fetching events from EventService:', err)
+              reject(err)
+            } else {
+              resolve(response)
+            }
+          }
+        )
+      })
+
+      const matchingEvent = eventsResponse.events?.find(
+        event => event.blockchain_event_id === blockchain_event_id
+      )
+
+      if (!matchingEvent) {
+        console.warn(
+          `⚠️ No system event found with blockchain_event_id: ${blockchain_event_id}`
+        )
+      } else {
+        eventDetails = matchingEvent
+        console.log(
+          `✅ Found matching event: ${eventDetails.name} (ID: ${eventDetails.id})`
+        )
+      }
+    } catch (eventError) {
+      console.warn(
+        '⚠️ Could not fetch event details for time validation:',
+        eventError
+      )
+    }
+
+    // ✅ STEP 3: Validate event has ended if we have event details
+    if (
+      eventDetails &&
+      eventDetails.sessions &&
+      eventDetails.sessions.length > 0
+    ) {
+      const now = Date.now() / 1000 // Current time in seconds
+
+      // Find the latest end time among all sessions
+      const latestEndTime = Math.max(
+        ...eventDetails.sessions.map(session => {
+          const endTime =
+            session.end_time < 10000000000
+              ? session.end_time
+              : session.end_time / 1000
+          return endTime
+        })
+      )
+
+      console.log(`🔍 Event timing validation:`, {
+        eventName: eventDetails.name,
+        now: new Date(now * 1000).toISOString(),
+        latestSessionEnd: new Date(latestEndTime * 1000).toISOString(),
+        hasEnded: now > latestEndTime,
+        timeDifferenceHours: ((now - latestEndTime) / 3600).toFixed(2)
+      })
+
+      // ✅ ENFORCE: Event must have ended before settlement
+      if (now <= latestEndTime) {
+        const timeUntilEnd = latestEndTime - now
+        const minutesUntilEnd = Math.ceil(timeUntilEnd / 60)
+
+        // ✅ FIX: Simpler English error message for better gRPC transmission
+        const errorMessage = `Cannot settle ongoing event. Event "${eventDetails.name}" ends in ${minutesUntilEnd} minutes.`
+
+        console.log(
+          `❌ Settlement rejected: Không thể settlement cho sự kiện đang diễn ra. Event "${
+            eventDetails.name
+          }" sẽ kết thúc vào ${new Date(latestEndTime * 1000).toLocaleString(
+            'vi-VN'
+          )} (còn ${minutesUntilEnd} phút nữa).`
+        )
+
+        return callback({
+          code: grpc.status.FAILED_PRECONDITION,
+          message: errorMessage // ✅ Use English message for gRPC
+        })
+      }
+
+      // ✅ OPTIONAL: Add grace period (e.g., 1 hour after event ends)
+      const gracePeriodHours = 0
+      const gracePeriodSeconds = gracePeriodHours * 3600
+      const earliestSettlementTime = latestEndTime + gracePeriodSeconds
+
+      if (now < earliestSettlementTime) {
+        const timeUntilSettlement = earliestSettlementTime - now
+        const minutesUntilSettlement = Math.ceil(timeUntilSettlement / 60)
+
+        // ✅ FIX: English message
+        const errorMessage = `Settlement available in ${minutesUntilSettlement} minutes. Grace period: ${gracePeriodHours} hour(s) after event ends.`
+
+        console.log(
+          `❌ Settlement rejected (grace period): Settlement sẽ khả dụng sau ${minutesUntilSettlement} phút nữa. Cần có thời gian chờ ${gracePeriodHours} giờ sau khi sự kiện kết thúc.`
+        )
+
+        return callback({
+          code: grpc.status.FAILED_PRECONDITION,
+          message: errorMessage // ✅ Use English message for gRPC
+        })
+      }
+
+      console.log(
+        `✅ Event has ended and grace period passed. Settlement allowed.`
+      )
+    } else {
+      console.log(
+        `⚠️ No session timing info available. Proceeding with settlement.`
+      )
+    }
+
+    // ✅ STEP 4: Proceed with settlement
+    console.log(`Settling revenue for event ${blockchain_event_id}:`, {
+      organizer,
+      organizerRevenue: organizerRevenue.toString(),
+      platformFees: platformFees.toString(),
+      eventName: eventDetails?.name || 'Unknown'
+    })
+
+    const tx = await eventTicketNFTContract.settleEventRevenue(
+      eventIdBN,
+      txOptions
+    )
+
+    const receipt = await waitForTransaction(tx)
+
+    console.log(
+      `✅ Settlement completed for event "${
+        eventDetails?.name || blockchain_event_id
+      }":`,
+      {
+        transactionHash: receipt.hash,
+        organizerAmount: organizerRevenue.toString(),
+        platformFee: platformFees.toString(),
+        organizer
+      }
+    )
+
+    callback(null, {
+      success: true,
+      transaction_hash: receipt.hash,
+      organizer_amount_wei: organizerRevenue.toString(),
+      platform_fee_wei: platformFees.toString(),
+      organizer_address: organizer,
+      event_name: eventDetails?.name || 'Unknown',
+      event_end_time:
+        eventDetails?.sessions?.length > 0
+          ? Math.max(...eventDetails.sessions.map(s => s.end_time))
+          : 0,
+      settlement_time: Math.floor(Date.now() / 1000)
+    })
+  } catch (error) {
+    console.error('SettleEventRevenue error:', error)
+
+    // ✅ FIX: Better error message handling with English messages
+    let errorMessage = 'Failed to settle event revenue'
+
+    if (error.message) {
+      errorMessage = error.message
+    }
+
+    // Check for specific contract errors
+    if (error.message?.includes('Event has not ended')) {
+      errorMessage = 'Event has not ended yet, cannot settle'
+    } else if (error.message?.includes('Already settled')) {
+      errorMessage = 'Event revenue has already been settled'
+    } else if (error.message?.includes('No revenue')) {
+      errorMessage = 'No revenue to settle for this event'
+    }
+
+    console.log(`❌ Settlement error details:`, {
+      originalError: error.message,
+      finalMessage: errorMessage,
+      code: grpc.status.FAILED_PRECONDITION
+    })
+
+    callback({
+      code: grpc.status.FAILED_PRECONDITION,
+      message: errorMessage
+    })
+  }
+}
+
+async function WithdrawPlatformFees (call, callback) {
+  const { amount_wei } = call.request
+
+  console.log(`WithdrawPlatformFees called for amount: ${amount_wei}`)
+
+  try {
+    const amountBN = BigInt(amount_wei)
+    const txOptions = await prepareGasOptions()
+
+    // Check total platform fees
+    const totalFees = await eventTicketNFTContract.getTotalPlatformFees()
+
+    if (amountBN > totalFees) {
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: `Insufficient platform fees. Available: ${totalFees.toString()}, Requested: ${amount_wei}`
+      })
+    }
+
+    console.log(`Withdrawing platform fees:`, {
+      amount: amount_wei,
+      totalAvailable: totalFees.toString()
+    })
+
+    // Call contract to withdraw
+    const tx = await eventTicketNFTContract.withdrawPlatformFees(
+      amountBN,
+      txOptions
+    )
+
+    const receipt = await waitForTransaction(tx)
+
+    callback(null, {
+      success: true,
+      transaction_hash: receipt.hash,
+      amount_wei: amount_wei
+    })
+  } catch (error) {
+    console.error('WithdrawPlatformFees error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to withdraw platform fees'
+    })
+  }
+}
+
+async function GetEventRevenue (call, callback) {
+  const { blockchain_event_id } = call.request
+
+  try {
+    const eventIdBN = BigInt(blockchain_event_id)
+
+    const revenueInfo = await eventTicketNFTContract.getEventRevenue(eventIdBN)
+    const [organizerRevenue, platformFees, settled, organizer] = revenueInfo
+
+    callback(null, {
+      organizer_revenue_wei: organizerRevenue.toString(),
+      platform_fees_wei: platformFees.toString(),
+      settled: settled,
+      organizer_address: organizer
+    })
+  } catch (error) {
+    console.error('GetEventRevenue error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to get event revenue'
+    })
+  }
+}
+
+async function GetContractBalance (call, callback) {
+  console.log('GetContractBalance called')
+
+  try {
+    // Get contract balance
+    const contractBalance = await provider.getBalance(
+      eventTicketNFTContract.target || eventTicketNFTContract.address
+    )
+
+    // Get total platform fees from contract
+    const totalPlatformFees =
+      await eventTicketNFTContract.getTotalPlatformFees()
+
+    // Get platform fee percentage
+    const platformFeePercent =
+      await eventTicketNFTContract.getPlatformFeePercent()
+
+    console.log('📊 Contract balance info:', {
+      contractBalance: contractBalance.toString(),
+      totalPlatformFees: totalPlatformFees.toString(),
+      platformFeePercent: platformFeePercent.toString()
+    })
+
+    callback(null, {
+      contract_balance_wei: contractBalance.toString(),
+      total_platform_fees_wei: totalPlatformFees.toString(),
+      platform_fee_percent: Number(platformFeePercent)
+    })
+  } catch (error) {
+    console.error('GetContractBalance error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to get contract balance'
+    })
+  }
+}
+
+// Export updated functions
 module.exports = {
   RegisterEventOnBlockchain,
   RegisterTicketTypeOnBlockchain,
@@ -687,5 +1101,11 @@ module.exports = {
   MintTicket,
   VerifyTransaction,
   ParseTransactionLogs,
-  VerifyTokenOwnership
+  VerifyTokenOwnership,
+  SettleEventRevenue,
+  WithdrawPlatformFees,
+  GetEventRevenue,
+  SetPlatformFee,
+  GetPlatformFee,
+  GetContractBalance
 }

@@ -31,6 +31,48 @@ service BlockchainService {
   rpc ParseTransactionLogs(ParseTransactionLogsRequest) returns (ParseTransactionLogsResponse);
 
   rpc VerifyTokenOwnership(VerifyTokenOwnershipRequest) returns (VerifyTokenOwnershipResponse);
+
+ // ✅ NEW: Platform fee management
+  rpc SetPlatformFee(SetPlatformFeeRequest) returns (SetPlatformFeeResponse) {
+    option (google.api.http) = {
+      post: "/v1/admin/platform/fee"
+      body: "*"
+    };
+  }
+  
+  rpc GetPlatformFee(GetPlatformFeeRequest) returns (GetPlatformFeeResponse) {
+    option (google.api.http) = {
+      get: "/v1/admin/platform/fee"
+    };
+  }
+
+  // ✅ NEW: Revenue management
+  rpc GetEventRevenue(GetEventRevenueRequest) returns (GetEventRevenueResponse) {
+    option (google.api.http) = {
+      get: "/v1/admin/events/{blockchain_event_id}/revenue"
+    };
+  }
+
+  rpc SettleEventRevenue(SettleEventRevenueRequest) returns (SettleEventRevenueResponse) {
+    option (google.api.http) = {
+      post: "/v1/admin/events/{blockchain_event_id}/settle"
+      body: "*"
+    };
+  }
+
+  rpc WithdrawPlatformFees(WithdrawPlatformFeesRequest) returns (WithdrawPlatformFeesResponse) {
+    option (google.api.http) = {
+      post: "/v1/admin/platform/withdraw"
+      body: "*"
+    };
+  }
+
+  // ✅ NEW: Get contract balance
+  rpc GetContractBalance(GetContractBalanceRequest) returns (GetContractBalanceResponse) {
+    option (google.api.http) = {
+      get: "/v1/admin/platform/balance"
+    };
+  }
 }
 
 // ----- Messages -----
@@ -112,6 +154,7 @@ message RegisterEventOnBlockchainRequest {
   string system_event_id_for_ref = 1;
   string blockchain_event_id = 2;
   string event_name = 3; // ✅ ADD: Event name
+  string organizer_address = 4; // ✅ NEW: Organizer wallet address
 }
 
 // ✅ NEW: Messages for ownership verification
@@ -125,4 +168,74 @@ message VerifyTokenOwnershipResponse {
   string actual_owner = 2;
   string expected_owner = 3;
   string reason = 4;
+}
+
+message SettleEventRevenueRequest {
+  string blockchain_event_id = 1;
+  bool force_settlement = 2; // ✅ NEW: Admin override for emergency cases
+  string admin_reason = 3;   // ✅ NEW: Reason for forced settlement
+}
+
+message SettleEventRevenueResponse {
+  bool success = 1;
+  string transaction_hash = 2;
+  string organizer_amount_wei = 3;
+  string platform_fee_wei = 4;
+  string organizer_address = 5;
+  string event_name = 6;           // ✅ NEW: Event name for confirmation
+  int64 event_end_time = 7;        // ✅ NEW: When the event actually ended
+  int64 settlement_time = 8;       // ✅ NEW: When settlement occurred
+}
+
+message WithdrawPlatformFeesRequest {
+  string amount_wei = 1;
+}
+
+message WithdrawPlatformFeesResponse {
+  bool success = 1;
+  string transaction_hash = 2;
+  string amount_wei = 3;
+}
+
+message GetEventRevenueRequest {
+  string blockchain_event_id = 1;
+}
+
+message GetEventRevenueResponse {
+  string organizer_revenue_wei = 1;
+  string platform_fees_wei = 2;
+  bool settled = 3;
+  string organizer_address = 4;
+}
+
+// ✅ NEW: Platform fee management messages
+message SetPlatformFeeRequest {
+  uint32 fee_percent = 1; // 0-30%
+}
+
+message SetPlatformFeeResponse {
+  bool success = 1;
+  string transaction_hash = 2;
+  uint32 old_fee_percent = 3;
+  uint32 new_fee_percent = 4;
+}
+
+message GetPlatformFeeRequest {
+  // Empty - just get current fee
+}
+
+message GetPlatformFeeResponse {
+  uint32 fee_percent = 1;
+  uint32 max_fee_percent = 2;
+}
+
+// ✅ NEW: Contract balance messages
+message GetContractBalanceRequest {
+  // Empty request
+}
+
+message GetContractBalanceResponse {
+  string contract_balance_wei = 1;
+  string total_platform_fees_wei = 2;
+  uint32 platform_fee_percent = 3;
 }
