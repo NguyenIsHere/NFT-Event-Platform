@@ -10,8 +10,8 @@ const purchaseSchema = new Schema(
       index: true
     },
     ticketTypeId: {
-      type: Schema.Types.ObjectId, // ✅ FIX: Thay đổi từ String sang ObjectId
-      ref: 'TicketType', // ✅ ADD: Thêm tham chiếu
+      type: Schema.Types.ObjectId,
+      ref: 'TicketType',
       required: true
     },
     quantity: {
@@ -45,7 +45,6 @@ const purchaseSchema = new Schema(
       type: Object,
       required: true
     },
-    // ✅ ADD: metadataUris field
     metadataUris: [
       {
         type: String
@@ -58,7 +57,9 @@ const purchaseSchema = new Schema(
 )
 
 // Auto-expire purchases after 15 minutes
-purchaseSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+purchaseSchema.index({ expiresAt: 1 })
+purchaseSchema.index({ status: 1 })
+purchaseSchema.index({ walletAddress: 1, status: 1 })
 
 const Purchase = mongoose.model('Purchase', purchaseSchema)
 
