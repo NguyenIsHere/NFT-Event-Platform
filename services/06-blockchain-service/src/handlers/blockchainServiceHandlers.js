@@ -7,7 +7,7 @@ const {
   ethers
 } = require('../utils/contractUtils')
 const eventServiceClient = require('../clients/eventServiceClient')
-
+const ticketServiceClient = require('../clients/ticketServiceClient')
 // Helper function để chờ giao dịch được mined và lấy receipt
 async function waitForTransaction (txResponse, confirmations = 1) {
   console.log(`Waiting for transaction ${txResponse.hash} to be mined...`)
@@ -941,6 +941,39 @@ async function SettleEventRevenue (call, callback) {
       }
     )
 
+    try {
+      await new Promise((resolve, reject) => {
+        ticketServiceClient.LogRevenueSettlement(
+          {
+            transaction_hash: receipt.hash,
+            block_number: receipt.blockNumber,
+            gas_used: receipt.gasUsed?.toString() || '0',
+            gas_price_wei: tx.maxFeePerGas?.toString() || '',
+            event_id: eventDetails?.id || '',
+            organizer_id: eventDetails?.organizer_id || '',
+            organizer_amount_wei: organizerRevenue.toString(),
+            platform_fee_wei: platformFees.toString(),
+            organizer_address: organizer,
+            event_name: eventDetails?.name || ''
+          },
+          (err, res) => {
+            if (err) {
+              console.error('❌ LogRevenueSettlement gRPC error:', err)
+              reject(err)
+            } else {
+              console.log('✅ LogRevenueSettlement success:', res)
+              resolve(res)
+            }
+          }
+        )
+      })
+    } catch (logErr) {
+      console.warn(
+        '⚠️ Không thể log revenue settlement sang ticket-service:',
+        logErr
+      )
+    }
+
     callback(null, {
       success: true,
       transaction_hash: receipt.hash,
@@ -1017,6 +1050,36 @@ async function WithdrawPlatformFees (call, callback) {
     )
 
     const receipt = await waitForTransaction(tx)
+
+    // ✅ Gọi ticketServiceClient.LogPlatformWithdraw để log
+    try {
+      await new Promise((resolve, reject) => {
+        ticketServiceClient.LogPlatformWithdraw(
+          {
+            transaction_hash: receipt.hash,
+            block_number: receipt.blockNumber,
+            gas_used: receipt.gasUsed?.toString() || '0',
+            gas_price_wei: tx.maxFeePerGas?.toString() || '',
+            amount_wei: amount_wei,
+            admin_address: signer.address // hoặc lấy từ env nếu cần
+          },
+          (err, res) => {
+            if (err) {
+              console.error('❌ LogPlatformWithdraw gRPC error:', err)
+              reject(err)
+            } else {
+              console.log('✅ LogPlatformWithdraw success:', res)
+              resolve(res)
+            }
+          }
+        )
+      })
+    } catch (logErr) {
+      console.warn(
+        '⚠️ Không thể log platform withdraw sang ticket-service:',
+        logErr
+      )
+    }
 
     callback(null, {
       success: true,

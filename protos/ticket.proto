@@ -169,6 +169,42 @@ service TicketService {
       get: "/v1/organizers/{organizer_id}/analytics"
     };
   }
+
+  // ✅ NEW: Log revenue settlement từ blockchain service
+  rpc LogRevenueSettlement(LogRevenueSettlementRequest) returns (LogResponse);
+
+  // ✅ NEW: Log platform withdraw từ blockchain service
+  rpc LogPlatformWithdraw(LogPlatformWithdrawRequest) returns (LogResponse);
+}
+
+// ✅ NEW: LogRevenueSettlementRequest
+message LogRevenueSettlementRequest {
+  string transaction_hash = 1;
+  uint64 block_number = 2;
+  string gas_used = 3;
+  string gas_price_wei = 4;
+  string event_id = 5;
+  string organizer_id = 6;
+  string organizer_amount_wei = 7;
+  string platform_fee_wei = 8;
+  string organizer_address = 9;
+  string event_name = 10;
+}
+
+// ✅ NEW: LogPlatformWithdrawRequest
+message LogPlatformWithdrawRequest {
+  string transaction_hash = 1;
+  uint64 block_number = 2;
+  string gas_used = 3;
+  string gas_price_wei = 4;
+  string amount_wei = 5;
+  string admin_address = 6;
+}
+
+// ✅ NEW: LogResponse
+message LogResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 message HourlyPurchase {

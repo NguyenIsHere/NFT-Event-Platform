@@ -1399,6 +1399,70 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
   }
 }
 
+// ✅ NEW: Log revenue settlement từ blockchain service
+async function LogRevenueSettlement (call, callback) {
+  try {
+    const {
+      transaction_hash,
+      block_number,
+      gas_used,
+      gas_price_wei,
+      event_id,
+      organizer_id,
+      organizer_amount_wei,
+      platform_fee_wei,
+      organizer_address,
+      event_name
+    } = call.request
+
+    await TransactionLogger.logRevenueSettlement({
+      transactionHash: transaction_hash,
+      blockNumber: block_number,
+      gasUsed: gas_used,
+      gasPriceWei: gas_price_wei,
+      eventId: event_id,
+      organizerId: organizer_id,
+      organizerAmountWei: organizer_amount_wei,
+      platformFeeWei: platform_fee_wei,
+      organizerAddress: organizer_address,
+      eventName: event_name
+    })
+
+    callback(null, { success: true, message: 'Revenue settlement logged' })
+  } catch (error) {
+    console.error('LogRevenueSettlement error:', error)
+    callback(null, { success: false, message: error.message })
+  }
+}
+
+// ✅ NEW: Log platform withdraw từ blockchain service
+async function LogPlatformWithdraw (call, callback) {
+  try {
+    const {
+      transaction_hash,
+      block_number,
+      gas_used,
+      gas_price_wei,
+      amount_wei,
+      admin_address
+    } = call.request
+
+    await TransactionLogger.logPlatformWithdraw({
+      transactionHash: transaction_hash,
+      blockNumber: block_number,
+      gasUsed: gas_used,
+      gasPriceWei: gas_price_wei,
+      amountWei: amount_wei,
+      adminAddress: admin_address
+    })
+
+    callback(null, { success: true, message: 'Platform withdraw logged' })
+  } catch (error) {
+    console.error('LogPlatformWithdraw error:', error)
+    callback(null, { success: false, message: error.message })
+  }
+}
+
 module.exports = {
   InitiatePurchase,
   ConfirmPaymentAndRequestMint,
@@ -1416,5 +1480,7 @@ module.exports = {
   GetSoldSeatsByEvent,
   GetMyTicketsWithDetails,
   GetAdminAnalytics,
-  GetOrganizerAnalytics
+  GetOrganizerAnalytics,
+  LogRevenueSettlement,
+  LogPlatformWithdraw
 }
