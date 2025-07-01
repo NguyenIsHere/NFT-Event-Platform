@@ -520,8 +520,8 @@ async function GetCheckinAnalytics (call, callback) {
     const baseMatch = {
       eventId: event_id,
       status: TICKET_STATUS_ENUM[4], // MINTED
-      checkInStatus: 'CHECKED_IN', // ✅ THÊM: Chỉ lấy tickets đã check-in
-      checkInTime: { $exists: true, $ne: null } // ✅ THÊM: Phải có checkInTime
+      checkInStatus: 'CHECKED_IN',
+      checkInTime: { $exists: true, $ne: null }
     }
 
     // ✅ FIX: Time range filtering
@@ -561,7 +561,6 @@ async function GetCheckinAnalytics (call, callback) {
       const startOfWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
       baseMatch.checkInTime = { $gte: startOfWeek }
     }
-    // For 'ALL' - no time filter
 
     console.log(`🔍 Base match query:`, JSON.stringify(baseMatch, null, 2))
 
@@ -569,9 +568,9 @@ async function GetCheckinAnalytics (call, callback) {
     const totalMatchingTickets = await Ticket.countDocuments(baseMatch)
     console.log(`📊 Total tickets matching criteria: ${totalMatchingTickets}`)
 
-    // ✅ FIX: Hourly check-in trend với better aggregation
+    // ✅ FIX: Hourly check-in trend với same base query
     const hourlyCheckins = await Ticket.aggregate([
-      { $match: baseMatch },
+      { $match: baseMatch }, // ✅ Same base query
       {
         $addFields: {
           checkInHour: {
@@ -585,7 +584,6 @@ async function GetCheckinAnalytics (call, callback) {
           count: { $sum: 1 },
           tickets: {
             $push: {
-              // ✅ DEBUG: Collect ticket details
               id: '$_id',
               checkInTime: '$checkInTime'
             }
@@ -600,22 +598,15 @@ async function GetCheckinAnalytics (call, callback) {
       JSON.stringify(hourlyCheckins, null, 2)
     )
 
-    // ✅ FIX: Check-in by location với debugging
+    // ✅ FIX: Check-in by location với SAME base query
     const locationStats = await Ticket.aggregate([
-      {
-        $match: {
-          eventId: event_id,
-          checkInStatus: 'CHECKED_IN',
-          checkInTime: { $exists: true, $ne: null }
-        }
-      },
+      { $match: baseMatch }, // ✅ Use same base query instead of separate query
       {
         $group: {
           _id: '$checkInLocation',
           count: { $sum: 1 },
           tickets: {
             $push: {
-              // ✅ DEBUG: Collect ticket details
               id: '$_id',
               checkInTime: '$checkInTime',
               location: '$checkInLocation'
@@ -630,14 +621,14 @@ async function GetCheckinAnalytics (call, callback) {
       JSON.stringify(locationStats, null, 2)
     )
 
-    // ✅ FIX: Summary statistics
+    // ✅ FIX: Summary statistics - use overall event query (no time filter)
+    const summaryQuery = {
+      eventId: event_id,
+      status: TICKET_STATUS_ENUM[4] // MINTED only
+    }
+
     const summary = await Ticket.aggregate([
-      {
-        $match: {
-          eventId: event_id,
-          status: TICKET_STATUS_ENUM[4] // MINTED only
-        }
-      },
+      { $match: summaryQuery },
       {
         $group: {
           _id: '$checkInStatus',
