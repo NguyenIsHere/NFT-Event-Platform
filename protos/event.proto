@@ -29,7 +29,13 @@ service EventService {
         body: "*" // Có thể không cần body nếu chỉ cần event_id
     };
   }
-  // Thêm UpdateEvent, DeleteEvent nếu cần
+  // ✅ ADD: Update Event method
+  rpc UpdateEvent(UpdateEventRequest) returns (EventResponse) {
+    option (google.api.http) = {
+      put: "/v1/events/{event_id}"
+      body: "*"
+    };
+  }
 }
 
 // ----- Messages -----
@@ -106,4 +112,17 @@ message PublishEventRequest {
   string desired_blockchain_event_id = 2; // ID mong muốn cho event trên contract
   string default_price_wei_on_chain = 3;  // Giá mặc định cho event trên contract
   string total_supply_on_chain = 4;       // Tổng cung cho event trên contract
+}
+
+// ✅ ADD: UpdateEventRequest message
+message UpdateEventRequest {
+  string event_id = 1;
+  string name = 2;
+  string description = 3;
+  string location = 4;
+  string banner_file_content_base64 = 5;
+  string banner_original_file_name = 6;
+  repeated SessionInput sessions = 7;
+  bool seat_map_enabled = 8;
+  bool is_active = 9;
 }

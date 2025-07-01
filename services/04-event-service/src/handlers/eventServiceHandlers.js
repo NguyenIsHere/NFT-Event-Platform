@@ -515,4 +515,139 @@ async function ListEvents (call, callback) {
   }
 }
 
-module.exports = { CreateEvent, GetEvent, ListEvents, PublishEvent } // Thêm PublishEvent
+async function UpdateEvent (call, callback) {
+  const {
+    event_id,
+    name,
+    description,
+    location,
+    banner_file_content_base64,
+    banner_original_file_name,
+    sessions,
+    seat_map_enabled,
+    is_active
+  } = call.request
+
+  console.log(`EventService: UpdateEvent called for ID: ${event_id}`)
+
+  try {
+    // ✅ VALIDATE EVENT ID
+    if (!mongoose.Types.ObjectId.isValid(event_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid event ID format.'
+      })
+    }
+
+    // ✅ FIND EXISTING EVENT
+    const existingEvent = await Event.findById(event_id)
+    if (!existingEvent) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Event not found.'
+      })
+    }
+
+    // ✅ CHECK IF EVENT CAN BE UPDATED
+    if (existingEvent.status === 'ACTIVE') {
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message:
+          'Cannot update active event. Event must be in DRAFT or FAILED_PUBLISH status.'
+      })
+    }
+
+    // ✅ PREPARE UPDATE DATA
+    const updateData = {}
+
+    if (name && name.trim()) updateData.name = name.trim()
+    if (description && description.trim())
+      updateData.description = description.trim()
+    if (location !== undefined) updateData.location = location.trim()
+    if (seat_map_enabled !== undefined)
+      updateData.seatMapEnabled = Boolean(seat_map_enabled)
+    if (is_active !== undefined) updateData.isActive = Boolean(is_active)
+
+    // ✅ PROCESS BANNER UPLOAD IF PROVIDED
+    if (banner_file_content_base64 && banner_original_file_name) {
+      try {
+        const pinResponse = await new Promise((resolve, reject) => {
+          ipfsServiceClient.PinFile(
+            {
+              file_content_base64: banner_file_content_base64,
+              original_file_name: banner_original_file_name
+            },
+            (error, response) => {
+              if (error) reject(error)
+              else resolve(response)
+            }
+          )
+        })
+
+        if (pinResponse && pinResponse.cid) {
+          updateData.bannerUrlCid = pinResponse.cid
+          console.log(`✅ Banner uploaded to IPFS: ${pinResponse.cid}`)
+        }
+      } catch (ipfsError) {
+        console.error('❌ IPFS upload failed:', ipfsError)
+        // Continue without banner update
+      }
+    }
+
+    // ✅ PROCESS SESSIONS IF PROVIDED
+    if (sessions && Array.isArray(sessions) && sessions.length > 0) {
+      const mongooseSessions = sessions.map((s_in, index) => {
+        if (!s_in.start_time || !s_in.end_time) {
+          throw new Error(
+            `Session ${index + 1}: start_time and end_time are required.`
+          )
+        }
+
+        return {
+          contractSessionId:
+            s_in.contract_session_id || `${Date.now()}${index}`,
+          name: s_in.name?.trim() || `Session ${index + 1}`,
+          startTime: s_in.start_time,
+          endTime: s_in.end_time
+        }
+      })
+
+      updateData.sessions = mongooseSessions
+    }
+
+    // ✅ UPDATE EVENT
+    const updatedEvent = await Event.findByIdAndUpdate(
+      event_id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    )
+
+    console.log(
+      `✅ EventService: Event "${updatedEvent.name}" updated successfully`
+    )
+
+    callback(null, { event: eventToGrpcEvent(updatedEvent) })
+  } catch (error) {
+    console.error('EventService: UpdateEvent RPC error:', error)
+
+    if (error.name === 'ValidationError') {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: `Validation error: ${error.message}`
+      })
+    }
+
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to update event.'
+    })
+  }
+}
+
+module.exports = {
+  CreateEvent,
+  GetEvent,
+  ListEvents,
+  PublishEvent,
+  UpdateEvent
+}
