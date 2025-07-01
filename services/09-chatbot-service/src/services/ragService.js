@@ -55,19 +55,22 @@ async function enrichResultsWithServiceData (vectorResults) {
         case 'event':
           const eventDetail = await eventClient.getEventById(metadata.id)
           if (eventDetail) {
+            // ✅ FIX: Use correct event fields
             enrichedData.title = eventDetail.name
             enrichedData.content = `Sự kiện: ${eventDetail.name}. Mô tả: ${
-              eventDetail.description
-            }. Ca sĩ: ${eventDetail.artist}. Địa điểm: ${
-              eventDetail.location
-            }. Thời gian: ${new Date(eventDetail.date).toLocaleDateString(
-              'vi-VN'
-            )}`
+              eventDetail.description || 'Không có mô tả'
+            }. Địa điểm: ${
+              eventDetail.location || 'Chưa xác định'
+            }. Trạng thái: ${eventDetail.status}. ${
+              eventDetail.is_active ? 'Đang mở bán vé' : 'Chưa mở bán'
+            }`
+
             enrichedData.additionalInfo = {
-              artist: eventDetail.artist,
               location: eventDetail.location,
-              date: eventDetail.date,
-              price: eventDetail.ticket_price
+              status: eventDetail.status,
+              is_active: eventDetail.is_active,
+              organizer_id: eventDetail.organizer_id,
+              sessions_count: eventDetail.sessions?.length || 0
             }
           }
           break
@@ -75,13 +78,17 @@ async function enrichResultsWithServiceData (vectorResults) {
         case 'ticket':
           const ticketDetail = await ticketClient.getTicketById(metadata.id)
           if (ticketDetail) {
-            enrichedData.title = `Vé ${ticketDetail.type}`
-            enrichedData.content = `Vé loại ${ticketDetail.type} cho sự kiện ID ${ticketDetail.event_id}. Giá: ${ticketDetail.price}. Trạng thái: ${ticketDetail.status}`
+            // ✅ FIX: Use correct ticket fields
+            enrichedData.title = `Vé sự kiện ${ticketDetail.event_id}`
+            enrichedData.content = `Vé ID ${ticketDetail.id} cho sự kiện ${ticketDetail.event_id}. Loại vé: ${ticketDetail.ticket_type_id}. Trạng thái: ${ticketDetail.status}. Check-in: ${ticketDetail.check_in_status}`
+
             enrichedData.additionalInfo = {
-              eventId: ticketDetail.event_id,
-              type: ticketDetail.type,
-              price: ticketDetail.price,
-              status: ticketDetail.status
+              event_id: ticketDetail.event_id,
+              ticket_type_id: ticketDetail.ticket_type_id,
+              status: ticketDetail.status,
+              owner_address: ticketDetail.owner_address,
+              check_in_status: ticketDetail.check_in_status,
+              token_id: ticketDetail.token_id
             }
           }
           break
@@ -89,12 +96,14 @@ async function enrichResultsWithServiceData (vectorResults) {
         case 'user':
           const userDetail = await userClient.getUserById(metadata.id)
           if (userDetail) {
-            enrichedData.title = userDetail.username
-            enrichedData.content = `Người dùng: ${userDetail.username}. Email: ${userDetail.email}. Role: ${userDetail.role}`
+            enrichedData.title = userDetail.full_name || userDetail.email
+            enrichedData.content = `Người dùng: ${
+              userDetail.full_name || userDetail.email
+            }. Email: ${userDetail.email}. Role: ${userDetail.role}`
             enrichedData.additionalInfo = {
-              username: userDetail.username,
               email: userDetail.email,
-              role: userDetail.role
+              role: userDetail.role,
+              wallet_address: userDetail.wallet_address
             }
           }
           break

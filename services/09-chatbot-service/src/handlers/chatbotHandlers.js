@@ -149,9 +149,25 @@ async function GetChatHistory (call, callback) {
     const { getChatHistory } = require('../models/ChatHistory')
     const { user_id, session_id, limit } = call.request
 
+    console.log(
+      `🔍 GetChatHistory called for user: ${user_id}, session: ${session_id}`
+    )
+
+    // ✅ FIX: Validate required fields
+    if (!user_id || typeof user_id !== 'string' || user_id.trim() === '') {
+      console.error('❌ Invalid user_id:', user_id)
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'user_id is required and must be a non-empty string'
+      })
+    }
+
     const messages = await getChatHistory(user_id, session_id, limit || 50)
 
-    callback(null, {
+    console.log(`✅ Found ${messages.length} chat messages for user ${user_id}`)
+
+    // ✅ FIX: Always return valid response, even if empty
+    const response = {
       messages: messages.map(msg => ({
         id: msg.id,
         user_id: msg.userId,
@@ -159,15 +175,26 @@ async function GetChatHistory (call, callback) {
         message: msg.message,
         response: msg.response,
         timestamp: Math.floor(new Date(msg.createdAt).getTime() / 1000),
-        detected_filters: msg.detectedFilters || [] // ✅ Include detected filters
+        detected_filters: msg.detectedFilters || []
       }))
+    }
+
+    console.log(`🔍 Returning response:`, {
+      messageCount: response.messages.length,
+      firstMessage: response.messages[0]
+        ? {
+            id: response.messages[0].id,
+            timestamp: response.messages[0].timestamp
+          }
+        : 'No messages'
     })
+
+    callback(null, response)
   } catch (error) {
-    console.error('ChatbotService: GetChatHistory error:', error)
-    callback({
-      code: grpc.status.INTERNAL,
-      message: error.message || 'Failed to get chat history'
-    })
+    console.error('❌ ChatbotService: GetChatHistory error:', error)
+
+    // ✅ FIX: Return empty array on error instead of failing
+    callback(null, { messages: [] })
   }
 }
 

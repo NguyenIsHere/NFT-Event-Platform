@@ -89,15 +89,19 @@ async function indexEvents (forceReindex = false) {
 
     console.log(`Processing ${events.length} events...`)
 
-    // Prepare texts for embedding
-    const eventTexts = events.map(
-      event => `${event.name} ${event.description} ${event.location}` // ← SỬA: bỏ artist
-    )
+    // ✅ FIX: Use correct event fields
+    const eventTexts = events.map(event => {
+      // Event fields: name, description, location, organizer_id, status
+      const eventDesc = event.description || ''
+      const eventLocation = event.location || ''
+
+      return `sự kiện ${event.name} ${eventDesc} địa điểm ${eventLocation}`
+    })
 
     // Generate embeddings
     const embeddings = await generateBatchEmbeddings(eventTexts)
 
-    // Prepare vectors for Pinecone
+    // ✅ FIX: Use correct metadata fields
     const vectors = events.map((event, index) => ({
       id: `event_${event.id}`,
       values: embeddings[index],
@@ -105,11 +109,15 @@ async function indexEvents (forceReindex = false) {
         id: event.id,
         type: 'event',
         title: event.name,
-        content: `Sự kiện: ${event.name}. Mô tả: ${event.description}. Địa điểm: ${event.location}`, // ← SỬA: bỏ artist, date
-        location: event.location,
-        organizer_id: event.organizer_id,
-        status: event.status,
-        is_active: event.is_active
+        content: `Sự kiện: ${event.name}. Mô tả: ${
+          event.description || 'Không có mô tả'
+        }. Địa điểm: ${event.location || 'Chưa xác định'}. Trạng thái: ${
+          event.status
+        }`,
+        location: event.location || '',
+        organizer_id: event.organizer_id || '',
+        status: event.status || 'DRAFT',
+        is_active: event.is_active || false
       }
     }))
 
@@ -119,6 +127,61 @@ async function indexEvents (forceReindex = false) {
     return events.length
   } catch (error) {
     console.error('Error indexing events:', error)
+    return 0
+  }
+}
+
+async function indexTickets (forceReindex = false) {
+  try {
+    console.log('Fetching tickets from ticket service...')
+    const tickets = await ticketClient.getAllTickets()
+
+    if (!tickets || tickets.length === 0) {
+      console.log('No tickets found to index')
+      return 0
+    }
+
+    console.log(`Processing ${tickets.length} tickets...`)
+
+    // ✅ FIX: Use correct ticket fields from proto
+    const ticketTexts = tickets.map(ticket => {
+      const eventId = ticket.event_id || 'unknown'
+      const status = ticket.status || 'unknown'
+      const ticketTypeId = ticket.ticket_type_id || 'standard'
+      const ownerAddress = ticket.owner_address || 'unknown'
+      const checkInStatus = ticket.check_in_status || 'NOT_CHECKED_IN'
+
+      return `vé ${ticketTypeId} sự kiện ${eventId} trạng thái ${status} chủ sở hữu ${ownerAddress} check-in ${checkInStatus}`
+    })
+
+    // Generate embeddings
+    const embeddings = await generateBatchEmbeddings(ticketTexts)
+
+    // ✅ FIX: Use correct metadata fields
+    const vectors = tickets.map((ticket, index) => ({
+      id: `ticket_${ticket.id}`,
+      values: embeddings[index],
+      metadata: {
+        id: ticket.id,
+        type: 'ticket',
+        title: `Vé cho sự kiện ${ticket.event_id}`,
+        content: `Vé ID ${ticket.id} cho sự kiện ${ticket.event_id}. Trạng thái: ${ticket.status}. Chủ sở hữu: ${ticket.owner_address}. Check-in: ${ticket.check_in_status}`,
+        event_id: ticket.event_id,
+        ticket_type_id: ticket.ticket_type_id,
+        status: ticket.status,
+        owner_address: ticket.owner_address,
+        token_id: ticket.token_id || '',
+        check_in_status: ticket.check_in_status || 'NOT_CHECKED_IN',
+        session_id: ticket.session_id || ''
+      }
+    }))
+
+    // Upsert to vector database
+    await upsertVectors(vectors)
+
+    return tickets.length
+  } catch (error) {
+    console.error('Error indexing tickets:', error)
     return 0
   }
 }
@@ -167,60 +230,6 @@ async function indexUsers (forceReindex = false) {
     return users.length
   } catch (error) {
     console.error('Error indexing users:', error)
-    return 0
-  }
-}
-
-async function indexTickets (forceReindex = false) {
-  try {
-    console.log('Fetching tickets from ticket service...')
-    const tickets = await ticketClient.getAllTickets()
-
-    if (!tickets || tickets.length === 0) {
-      console.log('No tickets found to index')
-      return 0
-    }
-
-    console.log(`Processing ${tickets.length} tickets...`)
-
-    // ✅ FIX: Map đúng fields từ ticket.proto
-    const ticketTexts = tickets.map(ticket => {
-      // Ticket fields từ proto: id, event_id, ticket_type_id, status, owner_address, etc.
-      const eventId = ticket.event_id || 'unknown'
-      const status = ticket.status || 'unknown'
-      const ticketTypeId = ticket.ticket_type_id || 'standard'
-      const ownerAddress = ticket.owner_address || 'unknown'
-
-      return `vé ${ticketTypeId} sự kiện ${eventId} trạng thái ${status} chủ sở hữu ${ownerAddress}`
-    })
-
-    // Generate embeddings
-    const embeddings = await generateBatchEmbeddings(ticketTexts)
-
-    // ✅ FIX: Map đúng metadata fields
-    const vectors = tickets.map((ticket, index) => ({
-      id: `ticket_${ticket.id}`,
-      values: embeddings[index],
-      metadata: {
-        id: ticket.id,
-        type: 'ticket',
-        title: `Vé cho sự kiện ${ticket.event_id}`,
-        content: `Vé ID ${ticket.id} cho sự kiện ${ticket.event_id}. Trạng thái: ${ticket.status}. Chủ sở hữu: ${ticket.owner_address}`,
-        event_id: ticket.event_id,
-        ticket_type_id: ticket.ticket_type_id,
-        status: ticket.status,
-        owner_address: ticket.owner_address,
-        token_id: ticket.token_id || '',
-        check_in_status: ticket.check_in_status || 'NOT_CHECKED_IN'
-      }
-    }))
-
-    // Upsert to vector database
-    await upsertVectors(vectors)
-
-    return tickets.length
-  } catch (error) {
-    console.error('Error indexing tickets:', error)
     return 0
   }
 }

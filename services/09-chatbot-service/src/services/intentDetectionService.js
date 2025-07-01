@@ -1,9 +1,7 @@
 const { generateEmbedding } = require('./embeddingService')
 
-// Keyword patterns để detect intent
 const INTENT_PATTERNS = {
   event: [
-    // Từ khóa về sự kiện
     'sự kiện',
     'event',
     'buổi',
@@ -25,11 +23,13 @@ const INTENT_PATTERNS = {
     'bao nhiêu sự kiện',
     'có sự kiện nào',
     'danh sách sự kiện',
-    'sự kiện gì'
+    'sự kiện gì',
+    'organizer',
+    'người tổ chức',
+    'trạng thái sự kiện'
   ],
 
   ticket: [
-    // Từ khóa về vé
     'vé',
     'ticket',
     'mua',
@@ -53,7 +53,7 @@ const INTENT_PATTERNS = {
     'payment',
     'mua vé',
     'đặt vé',
-    // ✅ THÊM: Check-in related keywords
+    // ✅ Check-in patterns
     'check-in',
     'check in',
     'checkin',
@@ -63,11 +63,14 @@ const INTENT_PATTERNS = {
     'đã tham gia',
     'attendance',
     'tham dự',
-    'vào sự kiện'
+    'vào sự kiện',
+    'quét vé',
+    'scan ticket',
+    'kiểm tra vé',
+    'xác nhận vé'
   ],
 
   user: [
-    // Từ khóa về người dùng (ít dùng vì privacy)
     'người dùng',
     'user',
     'tài khoản',
@@ -77,11 +80,13 @@ const INTENT_PATTERNS = {
     'thành viên',
     'member',
     'profile',
-    'hồ sơ'
+    'hồ sơ',
+    'organizer',
+    'admin'
   ]
 }
 
-// ✅ THÊM: Status/state patterns
+// ✅ Enhanced status patterns for check-in queries
 const STATUS_PATTERNS = [
   'trạng thái',
   'status',
@@ -90,7 +95,15 @@ const STATUS_PATTERNS = [
   'completed',
   'finished',
   'pending',
-  'processing'
+  'processing',
+  'check-in',
+  'checked in',
+  'đã vào',
+  'đã tham dự',
+  'active',
+  'hoạt động',
+  'minted',
+  'confirmed'
 ]
 
 // Location patterns
