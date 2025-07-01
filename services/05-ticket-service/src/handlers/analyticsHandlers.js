@@ -803,11 +803,12 @@ async function GetAdminAnalytics (call, callback) {
   }
 }
 
-// ✅ NEW: Organizer analytics function
 async function GetOrganizerAnalytics (call, callback) {
   const { organizer_id, date_range } = call.request
 
   try {
+    console.log('🔍 GetOrganizerAnalytics for:', organizer_id)
+
     const startDate = date_range?.start_date
       ? new Date(date_range.start_date * 1000)
       : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
@@ -815,56 +816,141 @@ async function GetOrganizerAnalytics (call, callback) {
       ? new Date(date_range.end_date * 1000)
       : new Date()
 
-    // Get organizer's transaction logs
-    const { logs } = await TransactionLogger.getTransactionLogs({
-      organizerId: organizer_id,
-      fromDate: startDate,
-      toDate: endDate,
-      status: 'CONFIRMED'
+    console.log('📅 Date range:', { startDate, endDate })
+
+    // ✅ 1. Get organizer's events from Event service
+    const eventServiceClient = require('../clients/eventServiceClient')
+    const eventsResponse = await new Promise((resolve, reject) => {
+      eventServiceClient.ListEvents(
+        { organizer_id: organizer_id },
+        (err, res) => {
+          if (err) reject(err)
+          else resolve(res)
+        }
+      )
     })
 
-    // Process for organizer analytics
-    const transactionSummary = {}
-    const eventBreakdown = {}
+    const events = eventsResponse.events || []
+    const eventIds = events.map(e => e.id)
 
-    logs.forEach(log => {
-      // Transaction summary by type
-      if (!transactionSummary[log.type]) {
-        transactionSummary[log.type] = {
-          count: 0,
-          totalRevenue: BigInt(0),
-          ticketsSold: 0
+    console.log('📋 Found events for organizer:', events.length)
+    console.log('🎯 Event IDs:', eventIds)
+
+    if (eventIds.length === 0) {
+      return callback(null, {
+        organizer_id,
+        date_range: {
+          start_date: Math.floor(startDate.getTime() / 1000),
+          end_date: Math.floor(endDate.getTime() / 1000)
+        },
+        total_events: 0,
+        total_tickets_sold: 0,
+        total_revenue_wei: '0',
+        event_breakdown: [],
+        transaction_summary: [],
+        daily_trends: []
+      })
+    }
+
+    // ✅ 2. Get TransactionLog data for revenue analytics
+    const transactionStats = await TransactionLog.aggregate([
+      {
+        $match: {
+          organizerId: organizer_id,
+          type: 'TICKET_PURCHASE',
+          status: 'CONFIRMED',
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalTicketsSold: { $sum: { $toInt: '$metadata.quantity' } },
+          totalRevenueWei: { $sum: { $toLong: '$organizerAmountWei' } },
+          totalPlatformFeeWei: { $sum: { $toLong: '$platformFeeWei' } }
         }
       }
+    ])
 
-      transactionSummary[log.type].count++
-      if (log.type === 'TICKET_PURCHASE') {
-        transactionSummary[log.type].totalRevenue += BigInt(
-          log.organizerAmountWei || '0'
-        )
-        transactionSummary[log.type].ticketsSold += log.metadata?.quantity || 1
-      }
-
-      // Event breakdown (only for ticket purchases)
-      if (log.type === 'TICKET_PURCHASE' && log.eventId) {
-        if (!eventBreakdown[log.eventId]) {
-          eventBreakdown[log.eventId] = {
-            eventId: log.eventId,
-            ticketsSold: 0,
-            totalRevenue: BigInt(0),
-            platformFeesPaid: BigInt(0)
-          }
+    // ✅ 3. Get event breakdown data
+    const eventBreakdownData = await TransactionLog.aggregate([
+      {
+        $match: {
+          organizerId: organizer_id,
+          type: 'TICKET_PURCHASE',
+          status: 'CONFIRMED',
+          eventId: { $in: eventIds }
         }
+      },
+      {
+        $group: {
+          _id: '$eventId',
+          tickets_sold: { $sum: { $toInt: '$metadata.quantity' } },
+          total_revenue_wei: { $sum: { $toLong: '$organizerAmountWei' } },
+          platform_fees_paid_wei: { $sum: { $toLong: '$platformFeeWei' } }
+        }
+      }
+    ])
 
-        eventBreakdown[log.eventId].ticketsSold += log.metadata?.quantity || 1
-        eventBreakdown[log.eventId].totalRevenue += BigInt(
-          log.organizerAmountWei || '0'
-        )
-        eventBreakdown[log.eventId].platformFeesPaid += BigInt(
-          log.platformFeeWei || '0'
-        )
+    // ✅ 4. Get daily trends
+    const dailyTrends = await TransactionLog.aggregate([
+      {
+        $match: {
+          organizerId: organizer_id,
+          type: 'TICKET_PURCHASE',
+          status: 'CONFIRMED',
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' },
+            day: { $dayOfMonth: '$createdAt' }
+          },
+          tickets_sold: { $sum: { $toInt: '$metadata.quantity' } },
+          revenue_wei: { $sum: { $toLong: '$organizerAmountWei' } }
+        }
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } }
+    ])
+
+    // ✅ 5. Create events lookup map
+    const eventsMap = {}
+    events.forEach(event => {
+      eventsMap[event.id] = event
+    })
+
+    // ✅ 6. Calculate totals
+    const stats = transactionStats[0] || {
+      totalTicketsSold: 0,
+      totalRevenueWei: 0,
+      totalPlatformFeeWei: 0
+    }
+
+    // ✅ 7. Format event breakdown
+    const eventBreakdown = eventBreakdownData.map(breakdown => {
+      const event = eventsMap[breakdown._id] || {}
+      return {
+        event_id: breakdown._id,
+        event_name: event.name || `Event ${breakdown._id.substring(0, 8)}`,
+        status: event.status || 'UNKNOWN',
+        tickets_sold: breakdown.tickets_sold,
+        total_revenue_wei: breakdown.total_revenue_wei.toString(),
+        platform_fees_paid_wei: breakdown.platform_fees_paid_wei.toString(),
+        conversion_rate: 0 // ✅ TODO: Calculate conversion rate
       }
     })
+
+    // ✅ 8. Format daily trends
+    const dailyTrendsFormatted = dailyTrends.map(trend => ({
+      date: `${trend._id.year}-${trend._id.month
+        .toString()
+        .padStart(2, '0')}-${trend._id.day.toString().padStart(2, '0')}`,
+      tickets_sold: trend.tickets_sold,
+      revenue_wei: trend.revenue_wei.toString()
+    }))
 
     const response = {
       organizer_id,
@@ -872,21 +958,27 @@ async function GetOrganizerAnalytics (call, callback) {
         start_date: Math.floor(startDate.getTime() / 1000),
         end_date: Math.floor(endDate.getTime() / 1000)
       },
-      transaction_summary: Object.entries(transactionSummary).map(
-        ([type, data]) => ({
-          type,
-          count: data.count,
-          total_revenue_wei: data.totalRevenue.toString(),
-          tickets_sold: data.ticketsSold
-        })
-      ),
-      event_breakdown: Object.values(eventBreakdown).map(event => ({
-        event_id: event.eventId,
-        tickets_sold: event.ticketsSold,
-        total_revenue_wei: event.totalRevenue.toString(),
-        platform_fees_paid_wei: event.platformFeesPaid.toString()
-      }))
+      // ✅ FIX: Add total fields that frontend expects
+      total_events: events.length,
+      total_tickets_sold: stats.totalTicketsSold,
+      total_revenue_wei: stats.totalRevenueWei.toString(),
+
+      // ✅ FIX: Add detailed breakdown
+      event_breakdown: eventBreakdown,
+      transaction_summary: [], // ✅ TODO: Add if needed
+      daily_trends: dailyTrendsFormatted
     }
+
+    console.log('✅ GetOrganizerAnalytics response:', {
+      organizer_id: response.organizer_id,
+      total_events: response.total_events,
+      total_tickets_sold: response.total_tickets_sold,
+      total_revenue_wei: response.total_revenue_wei,
+      event_breakdown_count: response.event_breakdown.length,
+      daily_trends_count: response.daily_trends.length,
+      sample_event_breakdown: response.event_breakdown[0],
+      sample_daily_trend: response.daily_trends[0]
+    })
 
     callback(null, response)
   } catch (error) {
@@ -1002,7 +1094,7 @@ module.exports = {
   GetEventDashboard,
   GetOrganizerStats,
   GetCheckinAnalytics,
-  GetAdminAnalytics, // ✅ NEW
+  GetAdminAnalytics,
   GetOrganizerAnalytics, // ✅ NEW
   LogRevenueSettlement, // ✅ NEW
   LogPlatformWithdraw // ✅ NEW

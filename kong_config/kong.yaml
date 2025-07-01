@@ -380,9 +380,18 @@ routes:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
-  - name: organizer-analytics-route-v1
+  - name: organizer-stats-route-v1
     service: ticket-grpc-service
     paths: ["~/v1/organizers/(?<organizer_id>[^/]+)/analytics$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: organizer-analytics-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/organizers/(?<organizer_id>[^/]+)/dashboard/analytics$"]
     methods: [GET]
     strip_path: false
     plugins:
