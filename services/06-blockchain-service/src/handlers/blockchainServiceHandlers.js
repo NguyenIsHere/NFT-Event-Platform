@@ -7,7 +7,10 @@ const {
   ethers
 } = require('../utils/contractUtils')
 const eventServiceClient = require('../clients/eventServiceClient')
-const ticketServiceClient = require('../clients/ticketServiceClient')
+const {
+  ticketServiceClient,
+  ticketTypeServiceClient
+} = require('../clients/ticketServiceClient')
 // Helper function để chờ giao dịch được mined và lấy receipt
 async function waitForTransaction (txResponse, confirmations = 1) {
   console.log(`Waiting for transaction ${txResponse.hash} to be mined...`)
@@ -941,8 +944,9 @@ async function SettleEventRevenue (call, callback) {
       }
     )
 
+    // ✅ UPDATED: Call LogRevenueSettlement with proper structure
     try {
-      await new Promise((resolve, reject) => {
+      const logResponse = await new Promise((resolve, reject) => {
         ticketServiceClient.LogRevenueSettlement(
           {
             transaction_hash: receipt.hash,
@@ -967,6 +971,14 @@ async function SettleEventRevenue (call, callback) {
           }
         )
       })
+
+      if (logResponse.success) {
+        console.log(
+          `✅ Revenue settlement logged with ID: ${logResponse.log_id}`
+        )
+      } else {
+        console.warn(`⚠️ Revenue settlement log failed: ${logResponse.message}`)
+      }
     } catch (logErr) {
       console.warn(
         '⚠️ Không thể log revenue settlement sang ticket-service:',
@@ -1051,9 +1063,9 @@ async function WithdrawPlatformFees (call, callback) {
 
     const receipt = await waitForTransaction(tx)
 
-    // ✅ Gọi ticketServiceClient.LogPlatformWithdraw để log
+    // ✅ UPDATED: Call LogPlatformWithdraw with proper structure
     try {
-      await new Promise((resolve, reject) => {
+      const logResponse = await new Promise(async (resolve, reject) => {
         ticketServiceClient.LogPlatformWithdraw(
           {
             transaction_hash: receipt.hash,
@@ -1061,7 +1073,7 @@ async function WithdrawPlatformFees (call, callback) {
             gas_used: receipt.gasUsed?.toString() || '0',
             gas_price_wei: tx.maxFeePerGas?.toString() || '',
             amount_wei: amount_wei,
-            admin_address: signer.address // hoặc lấy từ env nếu cần
+            admin_address: await signer.getAddress() // ✅ Get actual admin address
           },
           (err, res) => {
             if (err) {
@@ -1074,6 +1086,14 @@ async function WithdrawPlatformFees (call, callback) {
           }
         )
       })
+
+      if (logResponse.success) {
+        console.log(
+          `✅ Platform withdraw logged with ID: ${logResponse.log_id}`
+        )
+      } else {
+        console.warn(`⚠️ Platform withdraw log failed: ${logResponse.message}`)
+      }
     } catch (logErr) {
       console.warn(
         '⚠️ Không thể log platform withdraw sang ticket-service:',

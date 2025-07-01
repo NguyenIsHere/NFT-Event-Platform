@@ -171,10 +171,20 @@ service TicketService {
   }
 
   // ✅ NEW: Log revenue settlement từ blockchain service
-  rpc LogRevenueSettlement(LogRevenueSettlementRequest) returns (LogResponse);
+  rpc LogRevenueSettlement(LogRevenueSettlementRequest) returns (LogResponse) {
+    option (google.api.http) = {
+      post: "/v1/admin/transactions/revenue-settlement"
+      body: "*"
+    };
+  }
 
   // ✅ NEW: Log platform withdraw từ blockchain service
-  rpc LogPlatformWithdraw(LogPlatformWithdrawRequest) returns (LogResponse);
+  rpc LogPlatformWithdraw(LogPlatformWithdrawRequest) returns (LogResponse) {
+    option (google.api.http) = {
+      post: "/v1/admin/transactions/platform-withdraw"
+      body: "*"
+    };
+  }
 }
 
 // ✅ NEW: LogRevenueSettlementRequest
@@ -205,6 +215,7 @@ message LogPlatformWithdrawRequest {
 message LogResponse {
   bool success = 1;
   string message = 2;
+  string log_id = 3; // ✅ NEW: ID của log record được tạo
 }
 
 message HourlyPurchase {
@@ -212,13 +223,6 @@ message HourlyPurchase {
   int32 initiated_count = 2;
   int32 confirmed_count = 3;
 }
-
-// message PurchaseFlowStep {
-//   int32 hour = 1;
-//   string status = 2;
-//   int32 count = 3;
-//   int32 total_quantity = 4;
-// }
 
 // _____ Models _____
 message Ticket {

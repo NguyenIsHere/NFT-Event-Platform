@@ -36,6 +36,6 @@ const ticketTypeServiceClient = new ticketProto.TicketTypeService(
 )
 
 module.exports = {
-  ticketServiceClient, // Dùng để gọi các RPC của TicketService
-  ticketTypeServiceClient // Dùng để gọi các RPC của TicketTypeService
+  ticketServiceClient,
+  ticketTypeServiceClient
 }

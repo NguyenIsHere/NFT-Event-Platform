@@ -907,10 +907,112 @@ async function GetOrganizerAnalytics (call, callback) {
   }
 }
 
+async function LogRevenueSettlement (call, callback) {
+  try {
+    const {
+      transaction_hash,
+      block_number,
+      gas_used,
+      gas_price_wei,
+      event_id,
+      organizer_id,
+      organizer_amount_wei,
+      platform_fee_wei,
+      organizer_address,
+      event_name
+    } = call.request
+
+    console.log('📝 LogRevenueSettlement called:', {
+      transaction_hash,
+      event_id,
+      organizer_id,
+      organizer_amount_wei,
+      platform_fee_wei,
+      event_name
+    })
+
+    // ✅ Use TransactionLogger for consistency
+    const logResult = await TransactionLogger.logRevenueSettlement({
+      transactionHash: transaction_hash,
+      blockNumber: Number(block_number),
+      gasUsed: gas_used,
+      gasPriceWei: gas_price_wei,
+      eventId: event_id,
+      organizerId: organizer_id,
+      organizerAmountWei: organizer_amount_wei,
+      platformFeeWei: platform_fee_wei,
+      organizerAddress: organizer_address,
+      eventName: event_name
+    })
+
+    console.log('✅ Revenue settlement logged successfully:', logResult.id)
+
+    callback(null, {
+      success: true,
+      message: 'Revenue settlement logged successfully',
+      log_id: logResult.id
+    })
+  } catch (error) {
+    console.error('❌ LogRevenueSettlement error:', error)
+    callback(null, {
+      success: false,
+      message: error.message || 'Failed to log revenue settlement',
+      log_id: ''
+    })
+  }
+}
+
+// ✅ NEW: Log platform withdraw từ blockchain service
+async function LogPlatformWithdraw (call, callback) {
+  try {
+    const {
+      transaction_hash,
+      block_number,
+      gas_used,
+      gas_price_wei,
+      amount_wei,
+      admin_address
+    } = call.request
+
+    console.log('📝 LogPlatformWithdraw called:', {
+      transaction_hash,
+      amount_wei,
+      admin_address
+    })
+
+    // ✅ Use TransactionLogger for consistency
+    const logResult = await TransactionLogger.logPlatformWithdraw({
+      transactionHash: transaction_hash,
+      blockNumber: Number(block_number),
+      gasUsed: gas_used,
+      gasPriceWei: gas_price_wei,
+      amountWei: amount_wei,
+      adminAddress: admin_address
+    })
+
+    console.log('✅ Platform withdraw logged successfully:', logResult.id)
+
+    callback(null, {
+      success: true,
+      message: 'Platform withdraw logged successfully',
+      log_id: logResult.id
+    })
+  } catch (error) {
+    console.error('❌ LogPlatformWithdraw error:', error)
+    callback(null, {
+      success: false,
+      message: error.message || 'Failed to log platform withdraw',
+      log_id: ''
+    })
+  }
+}
+
 module.exports = {
   GetEventDashboard,
   GetOrganizerStats,
   GetCheckinAnalytics,
   GetAdminAnalytics, // ✅ NEW
-  GetOrganizerAnalytics // ✅ NEW
+  GetOrganizerAnalytics, // ✅ NEW
+  LogRevenueSettlement, // ✅ NEW
+  LogPlatformWithdraw // ✅ NEW
 }
