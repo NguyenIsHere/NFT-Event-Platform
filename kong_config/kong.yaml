@@ -398,6 +398,25 @@ routes:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
+  # ✅ NEW: Admin transaction management routes
+  - name: admin-transactions-list-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/admin/transactions$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  - name: admin-transaction-details-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/admin/transactions/(?<transaction_id>[^/]+)$"]
+    methods: [GET]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
   # ✅ === TRANSACTION LOGGING ROUTES (Internal & Admin) ===
   - name: log-revenue-settlement-route-v1
     service: ticket-grpc-service

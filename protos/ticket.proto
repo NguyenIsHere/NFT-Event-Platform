@@ -185,6 +185,110 @@ service TicketService {
       body: "*"
     };
   }
+
+  // ✅ NEW: Admin Transaction Management
+  rpc GetAllTransactions(GetAllTransactionsRequest) returns (GetAllTransactionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/admin/transactions"
+    };
+  }
+
+  // ✅ NEW: Get transaction details
+  rpc GetTransactionDetails(GetTransactionDetailsRequest) returns (TransactionDetails) {
+    option (google.api.http) = {
+      get: "/v1/admin/transactions/{transaction_id}"
+    };
+  }
+}
+
+// ✅ NEW: Transaction messages
+message GetAllTransactionsRequest {
+  DateRange date_range = 1;
+  string transaction_type = 2; // Filter by type: "ALL", "TICKET_PURCHASE", "REVENUE_SETTLEMENT", etc.
+  string status = 3; // Filter by status: "ALL", "CONFIRMED", "PENDING", "FAILED"
+  string organizer_id = 4; // Filter by organizer (optional)
+  string event_id = 5; // Filter by event (optional)
+  int32 page_size = 6;
+  string page_token = 7;
+}
+
+message GetAllTransactionsResponse {
+  repeated TransactionDetails transactions = 1;
+  string next_page_token = 2;
+  TransactionSummaryStats summary = 3;
+}
+
+message GetTransactionDetailsRequest {
+  string transaction_id = 1;
+}
+
+message TransactionDetails {
+  string id = 1;
+  string transaction_hash = 2;
+  uint64 block_number = 3;
+  string gas_used = 4;
+  string gas_price_wei = 5;
+  string type = 6; // TICKET_PURCHASE, REVENUE_SETTLEMENT, etc.
+  string status = 7; // CONFIRMED, PENDING, FAILED, CANCELLED
+  string event_id = 8;
+  string organizer_id = 9;
+  string user_id = 10;
+  string ticket_type_id = 11;
+  string amount_wei = 12;
+  string platform_fee_wei = 13;
+  string organizer_amount_wei = 14;
+  int32 fee_percent_at_time = 15;
+  string from_address = 16;
+  string to_address = 17;
+  string description = 18;
+  string failure_reason = 19;
+  int64 created_at = 20;
+  int64 processed_at = 21;
+  map<string, string> metadata = 22;
+  repeated string related_ticket_ids = 23;
+  string related_purchase_id = 24;
+  
+  // ✅ Additional enriched data
+  EventSummary event_info = 25;
+  OrganizerSummary organizer_info = 26;
+  UserSummary user_info = 27;
+}
+
+message TransactionSummaryStats {
+  int32 total_transactions = 1;
+  string total_amount_wei = 2;
+  string total_platform_fees_wei = 3;
+  string total_organizer_amount_wei = 4;
+  repeated TypeCount by_type = 5;
+  repeated StatusCount by_status = 6;
+  string total_gas_used = 7;
+  string avg_gas_price_wei = 8;
+}
+
+message TypeCount {
+  string type = 1;
+  int32 count = 2;
+  string total_amount_wei = 3;
+}
+
+message EventSummary {
+  string id = 1;
+  string name = 2;
+  string status = 3;
+  string blockchain_event_id = 4;
+}
+
+message OrganizerSummary {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+}
+
+message UserSummary {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  string wallet_address = 4;
 }
 
 // ✅ NEW: LogRevenueSettlementRequest

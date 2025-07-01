@@ -1090,12 +1090,398 @@ async function LogPlatformWithdraw (call, callback) {
   }
 }
 
+// ✅ NEW: Get all transactions for admin
+async function GetAllTransactions (call, callback) {
+  const {
+    date_range,
+    transaction_type,
+    status,
+    organizer_id,
+    event_id,
+    page_size = 20,
+    page_token
+  } = call.request
+
+  try {
+    console.log('🔍 GetAllTransactions called:', {
+      transaction_type,
+      status,
+      organizer_id,
+      event_id,
+      page_size
+    })
+
+    // ✅ Build query
+    const query = {}
+
+    // Date range filter
+    if (date_range) {
+      const startDate = date_range.start_date
+        ? new Date(date_range.start_date * 1000)
+        : null
+      const endDate = date_range.end_date
+        ? new Date(date_range.end_date * 1000)
+        : null
+
+      if (startDate || endDate) {
+        query.createdAt = {}
+        if (startDate) query.createdAt.$gte = startDate
+        if (endDate) query.createdAt.$lte = endDate
+      }
+    }
+
+    // Type filter
+    if (transaction_type && transaction_type !== 'ALL') {
+      query.type = transaction_type
+    }
+
+    // Status filter
+    if (status && status !== 'ALL') {
+      query.status = status
+    }
+
+    // Organizer filter
+    if (organizer_id) {
+      query.organizerId = organizer_id
+    }
+
+    // Event filter
+    if (event_id) {
+      query.eventId = event_id
+    }
+
+    // ✅ Pagination
+    const limit = Math.min(page_size, 100)
+    let skip = 0
+    if (page_token && !isNaN(parseInt(page_token))) {
+      skip = parseInt(page_token)
+    }
+
+    console.log('🔍 Transaction query:', JSON.stringify(query, null, 2))
+
+    // ✅ Get transactions with aggregation for enriched data
+    const transactions = await TransactionLog.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit + 1) // Get one extra to check if there are more
+
+    const hasMore = transactions.length > limit
+    const transactionsToReturn = hasMore
+      ? transactions.slice(0, limit)
+      : transactions
+
+    // ✅ Get summary stats
+    const summaryStats = await TransactionLog.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          total_transactions: { $sum: 1 },
+          total_amount_wei: { $sum: { $toLong: '$amountWei' } },
+          total_platform_fees_wei: { $sum: { $toLong: '$platformFeeWei' } },
+          total_organizer_amount_wei: {
+            $sum: { $toLong: '$organizerAmountWei' }
+          },
+          total_gas_used: {
+            $sum: {
+              $toLong: {
+                $ifNull: ['$gasUsed', '0']
+              }
+            }
+          },
+          avg_gas_price_wei: {
+            $avg: {
+              $toLong: {
+                $ifNull: ['$gasPriceWei', '0']
+              }
+            }
+          }
+        }
+      }
+    ])
+
+    // ✅ Get type breakdown
+    const typeBreakdown = await TransactionLog.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: '$type',
+          count: { $sum: 1 },
+          total_amount_wei: { $sum: { $toLong: '$amountWei' } }
+        }
+      }
+    ])
+
+    // ✅ Get status breakdown
+    const statusBreakdown = await TransactionLog.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ])
+
+    // ✅ Enrich transactions with related data
+    const enrichedTransactions = await Promise.all(
+      transactionsToReturn.map(async tx => {
+        let eventInfo = null
+        let organizerInfo = null
+        let userInfo = null
+
+        // Get event info if eventId exists
+        if (tx.eventId) {
+          try {
+            const eventServiceClient = require('../clients/eventServiceClient')
+            const eventResponse = await new Promise((resolve, reject) => {
+              eventServiceClient.GetEvent(
+                { event_id: tx.eventId },
+                (err, res) => {
+                  if (err) reject(err)
+                  else resolve(res)
+                }
+              )
+            })
+
+            if (eventResponse?.event) {
+              eventInfo = {
+                id: eventResponse.event.id,
+                name: eventResponse.event.name,
+                status: eventResponse.event.status,
+                blockchain_event_id: eventResponse.event.blockchain_event_id
+              }
+            }
+          } catch (error) {
+            console.warn(
+              `Failed to get event info for ${tx.eventId}:`,
+              error.message
+            )
+          }
+        }
+
+        // Get organizer info if organizerId exists
+        if (tx.organizerId) {
+          try {
+            const userServiceClient = require('../clients/userServiceClient')
+            const userResponse = await new Promise((resolve, reject) => {
+              userServiceClient.GetUser(
+                { user_id: tx.organizerId },
+                (err, res) => {
+                  if (err) reject(err)
+                  else resolve(res)
+                }
+              )
+            })
+
+            if (userResponse?.user) {
+              organizerInfo = {
+                id: userResponse.user.id,
+                name: userResponse.user.name,
+                email: userResponse.user.email
+              }
+            }
+          } catch (error) {
+            console.warn(
+              `Failed to get organizer info for ${tx.organizerId}:`,
+              error.message
+            )
+          }
+        }
+
+        // Get user info if userId exists
+        if (tx.userId) {
+          try {
+            const userServiceClient = require('../clients/userServiceClient')
+            const userResponse = await new Promise((resolve, reject) => {
+              userServiceClient.GetUser({ user_id: tx.userId }, (err, res) => {
+                if (err) reject(err)
+                else resolve(res)
+              })
+            })
+
+            if (userResponse?.user) {
+              userInfo = {
+                id: userResponse.user.id,
+                name: userResponse.user.name,
+                email: userResponse.user.email,
+                wallet_address: userResponse.user.wallet_address
+              }
+            }
+          } catch (error) {
+            console.warn(
+              `Failed to get user info for ${tx.userId}:`,
+              error.message
+            )
+          }
+        }
+
+        return {
+          id: tx._id.toString(),
+          transaction_hash: tx.transactionHash || '',
+          block_number: tx.blockNumber || 0,
+          gas_used: tx.gasUsed || '0',
+          gas_price_wei: tx.gasPriceWei || '0',
+          type: tx.type || '',
+          status: tx.status || '',
+          event_id: tx.eventId || '',
+          organizer_id: tx.organizerId || '',
+          user_id: tx.userId || '',
+          ticket_type_id: tx.ticketTypeId || '',
+          amount_wei: tx.amountWei || '0',
+          platform_fee_wei: tx.platformFeeWei || '0',
+          organizer_amount_wei: tx.organizerAmountWei || '0',
+          fee_percent_at_time: tx.feePercentAtTime || 0,
+          from_address: tx.fromAddress || '',
+          to_address: tx.toAddress || '',
+          description: tx.description || '',
+          failure_reason: tx.failureReason || '',
+          created_at: tx.createdAt
+            ? Math.floor(tx.createdAt.getTime() / 1000)
+            : 0,
+          processed_at: tx.processedAt
+            ? Math.floor(tx.processedAt.getTime() / 1000)
+            : 0,
+          metadata: tx.metadata ? Object.fromEntries(tx.metadata) : {},
+          related_ticket_ids: tx.relatedTicketIds || [],
+          related_purchase_id: tx.relatedPurchaseId || '',
+          event_info: eventInfo,
+          organizer_info: organizerInfo,
+          user_info: userInfo
+        }
+      })
+    )
+
+    const summary = summaryStats[0] || {
+      total_transactions: 0,
+      total_amount_wei: 0,
+      total_platform_fees_wei: 0,
+      total_organizer_amount_wei: 0,
+      total_gas_used: 0,
+      avg_gas_price_wei: 0
+    }
+
+    const response = {
+      transactions: enrichedTransactions,
+      next_page_token: hasMore ? (skip + limit).toString() : '',
+      summary: {
+        total_transactions: summary.total_transactions,
+        total_amount_wei: summary.total_amount_wei.toString(),
+        total_platform_fees_wei: summary.total_platform_fees_wei.toString(),
+        total_organizer_amount_wei:
+          summary.total_organizer_amount_wei.toString(),
+        total_gas_used: summary.total_gas_used.toString(),
+        avg_gas_price_wei: summary.avg_gas_price_wei.toString(),
+        by_type: typeBreakdown.map(t => ({
+          type: t._id,
+          count: t.count,
+          total_amount_wei: t.total_amount_wei.toString()
+        })),
+        by_status: statusBreakdown.map(s => ({
+          status: s._id,
+          count: s.count
+        }))
+      }
+    }
+
+    console.log('✅ GetAllTransactions response:', {
+      transactions_count: response.transactions.length,
+      total_in_query: summary.total_transactions,
+      has_more: hasMore
+    })
+
+    callback(null, response)
+  } catch (error) {
+    console.error('❌ GetAllTransactions error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to get transactions'
+    })
+  }
+}
+
+// ✅ NEW: Get transaction details
+async function GetTransactionDetails (call, callback) {
+  const { transaction_id } = call.request
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(transaction_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid transaction ID format'
+      })
+    }
+
+    const transaction = await TransactionLog.findById(transaction_id)
+    if (!transaction) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Transaction not found'
+      })
+    }
+
+    // Enrich with related data (same logic as above but for single transaction)
+    let eventInfo = null
+    let organizerInfo = null
+    let userInfo = null
+
+    // ... (same enrichment logic as in GetAllTransactions)
+
+    const enrichedTransaction = {
+      id: transaction._id.toString(),
+      transaction_hash: transaction.transactionHash || '',
+      block_number: transaction.blockNumber || 0,
+      gas_used: transaction.gasUsed || '0',
+      gas_price_wei: transaction.gasPriceWei || '0',
+      type: transaction.type || '',
+      status: transaction.status || '',
+      event_id: transaction.eventId || '',
+      organizer_id: transaction.organizerId || '',
+      user_id: transaction.userId || '',
+      ticket_type_id: transaction.ticketTypeId || '',
+      amount_wei: transaction.amountWei || '0',
+      platform_fee_wei: transaction.platformFeeWei || '0',
+      organizer_amount_wei: transaction.organizerAmountWei || '0',
+      fee_percent_at_time: transaction.feePercentAtTime || 0,
+      from_address: transaction.fromAddress || '',
+      to_address: transaction.toAddress || '',
+      description: transaction.description || '',
+      failure_reason: transaction.failureReason || '',
+      created_at: transaction.createdAt
+        ? Math.floor(transaction.createdAt.getTime() / 1000)
+        : 0,
+      processed_at: transaction.processedAt
+        ? Math.floor(transaction.processedAt.getTime() / 1000)
+        : 0,
+      metadata: transaction.metadata
+        ? Object.fromEntries(transaction.metadata)
+        : {},
+      related_ticket_ids: transaction.relatedTicketIds || [],
+      related_purchase_id: transaction.relatedPurchaseId || '',
+      event_info: eventInfo,
+      organizer_info: organizerInfo,
+      user_info: userInfo
+    }
+
+    callback(null, enrichedTransaction)
+  } catch (error) {
+    console.error('❌ GetTransactionDetails error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to get transaction details'
+    })
+  }
+}
+
+// ✅ Export new functions
 module.exports = {
   GetEventDashboard,
   GetOrganizerStats,
   GetCheckinAnalytics,
   GetAdminAnalytics,
-  GetOrganizerAnalytics, // ✅ NEW
-  LogRevenueSettlement, // ✅ NEW
-  LogPlatformWithdraw // ✅ NEW
+  GetOrganizerAnalytics,
+  LogRevenueSettlement,
+  LogPlatformWithdraw,
+  GetAllTransactions, // ✅ NEW
+  GetTransactionDetails // ✅ NEW
 }

@@ -19,7 +19,9 @@ const {
   GetAdminAnalytics,
   GetOrganizerAnalytics,
   LogRevenueSettlement,
-  LogPlatformWithdraw
+  LogPlatformWithdraw,
+  GetAllTransactions, // ✅ NEW
+  GetTransactionDetails // ✅ NEW
 } = require('./analyticsHandlers')
 const ethers = require('ethers')
 const TransactionLogger = require('../utils/transactionLogger')
@@ -1420,5 +1422,7 @@ module.exports = {
   GetAdminAnalytics,
   GetOrganizerAnalytics,
   LogRevenueSettlement,
-  LogPlatformWithdraw
+  LogPlatformWithdraw,
+  GetAllTransactions, // ✅ NEW
+  GetTransactionDetails // ✅ NEW
 }
