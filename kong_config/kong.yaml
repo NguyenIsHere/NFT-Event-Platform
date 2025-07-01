@@ -206,8 +206,7 @@ routes:
 
   - name: event-update-route-v1
     service: event-grpc-service
-    paths:
-      - "/v1/events/(?<event_id>[a-f0-9]{24})"
+    paths: ["~/v1/events/(?<event_id>[^/]+)$"]
     methods: ["PUT"]
     strip_path: false
     plugins:
