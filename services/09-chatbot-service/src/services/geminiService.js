@@ -18,6 +18,7 @@ async function generateResponse (userMessage, contextPrompt) {
     - KHÔNG sử dụng định dạng Markdown (*, **, #, -, etc.)
     - KHÔNG viết dài dòng hay lặp lại thông tin
     - ĐI THẲNG VÀO VẤN ĐỀ và trả lời cụ thể
+    - Trả lời một cách thân thiện nhưng không quá sáng tạo
     - Nếu không có dữ liệu, chỉ nói "Không tìm thấy" thay vì giải thích dài
     - Không sử dụng emoji hay ký tự đặc biệt
     - KHÔNG sử dụng từ ngữ như "tôi nghĩ", "có thể", "có lẽ" - chỉ nói sự thật
@@ -44,10 +45,10 @@ async function generateResponse (userMessage, contextPrompt) {
         }
       ],
       generationConfig: {
-        temperature: 0.3, // Giảm từ 0.7 để ít sáng tạo hơn, tập trung vào sự thật
+        temperature: 0.5, // Giảm từ 0.7 để ít sáng tạo hơn, tập trung vào sự thật
         topP: 0.8,
         topK: 40,
-        maxOutputTokens: 300, // Giảm từ 1024 để bắt buộc trả lời ngắn
+        maxOutputTokens: 1024, // Giảm từ 1024 để bắt buộc trả lời ngắn
         candidateCount: 1,
         stopSequences: ['\n\n\n'] // Dừng khi có quá nhiều dòng trống
       }
