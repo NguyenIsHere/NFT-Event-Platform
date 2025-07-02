@@ -1036,6 +1036,373 @@ async function GetMyTicketsWithDetails (call, callback) {
   }
 }
 
+// async function ConfirmPaymentAndRequestMint (call, callback) {
+//   const { ticket_order_id, payment_transaction_hash } = call.request
+
+//   try {
+//     console.log('🔄 ConfirmPaymentAndRequestMint called:', {
+//       ticket_order_id,
+//       payment_transaction_hash
+//     })
+
+//     // ✅ FIND pending tickets by order ID (thay vì Purchase)
+//     const pendingTickets = await Ticket.find({
+//       'metadata.ticketOrderId': ticket_order_id,
+//       status: TICKET_STATUS_ENUM[0] // PENDING_PAYMENT
+//     }).sort({ 'metadata.orderIndex': 1 })
+
+//     if (!pendingTickets || pendingTickets.length === 0) {
+//       return callback({
+//         code: grpc.status.NOT_FOUND,
+//         message: `No pending tickets found for order: ${ticket_order_id}`
+//       })
+//     }
+
+//     console.log(
+//       `✅ Found ${pendingTickets.length} pending tickets for order: ${ticket_order_id}`
+//     )
+
+//     const firstTicket = pendingTickets[0]
+//     const ticketType = await TicketType.findById(firstTicket.ticketTypeId)
+
+//     if (!ticketType) {
+//       return callback({
+//         code: grpc.status.NOT_FOUND,
+//         message: 'Ticket type not found'
+//       })
+//     }
+
+//     console.log('🔍 Processing order for ticket type:', {
+//       ticketTypeId: ticketType.id,
+//       name: ticketType.name,
+//       priceWei: ticketType.priceWei,
+//       eventId: ticketType.eventId
+//     })
+
+//     // ✅ VERIFY blockchain transaction để get gas info
+//     let transactionDetails = null
+//     let gasUsed = null
+//     let gasPriceWei = null
+
+//     const verifyResponse = await new Promise((resolve, reject) => {
+//       blockchainServiceClient.VerifyTransaction(
+//         { transaction_hash: payment_transaction_hash },
+//         (err, res) => {
+//           if (err) reject(err)
+//           else resolve(res)
+//         }
+//       )
+//     })
+
+//     if (verifyResponse.is_confirmed && verifyResponse.success_on_chain) {
+//       transactionDetails = verifyResponse
+//       // ✅ TODO: Extract gas info từ blockchain service nếu available
+//       gasUsed = verifyResponse.gas_used
+//       gasPriceWei = verifyResponse.gas_price_wei
+//     } else {
+//       console.log('verify failed')
+//     }
+
+//     console.log('✅ Transaction verified successfully:', {
+//       blockNumber: verifyResponse.block_number,
+//       valueWei: verifyResponse.value_wei,
+//       from: verifyResponse.from_address,
+//       to: verifyResponse.to_address
+//     })
+
+//     // ✅ GET current platform fee từ contract
+//     const feeResponse = await new Promise((resolve, reject) => {
+//       blockchainServiceClient.GetPlatformFee({}, (err, res) => {
+//         if (err) reject(err)
+//         else resolve(res)
+//       })
+//     })
+
+//     const currentPlatformFeePercent = feeResponse.fee_percent || 10
+
+//     // ✅ CALCULATE fees từ verified amount
+//     const totalPaidWei = parseFloat(verifyResponse.value_wei || '0')
+//     const platformFeeWei = Math.floor(
+//       (totalPaidWei * currentPlatformFeePercent) / 100
+//     )
+//     const organizerAmountWei = totalPaidWei - platformFeeWei
+
+//     console.log('💰 Fee calculation:', {
+//       totalPaidWei,
+//       currentPlatformFeePercent,
+//       platformFeeWei,
+//       organizerAmountWei
+//     })
+
+//     // ✅ UPDATE tickets to PAID
+//     await Ticket.updateMany(
+//       { 'metadata.ticketOrderId': ticket_order_id },
+//       {
+//         status: TICKET_STATUS_ENUM[1], // PAID
+//         transactionHash: payment_transaction_hash
+//       }
+//     )
+
+//     console.log(`✅ Updated ${pendingTickets.length} tickets to PAID status`)
+
+//     // ✅ GET parent event for organizer info
+//     let parentEvent = null
+//     try {
+//       const eventResponse = await new Promise((resolve, reject) => {
+//         eventServiceClient.GetEvent(
+//           { event_id: ticketType.eventId },
+//           { deadline: new Date(Date.now() + 10000) },
+//           (err, res) => {
+//             if (err) reject(err)
+//             else resolve(res)
+//           }
+//         )
+//       })
+//       parentEvent = eventResponse.event
+//     } catch (eventError) {
+//       console.warn('Could not fetch parent event:', eventError)
+//     }
+
+//     // ✅ LOG: Confirmed purchase transaction
+//     await TransactionLogger.logTicketPurchase({
+//       transactionHash: payment_transaction_hash,
+//       blockNumber: verifyResponse.block_number,
+//       gasUsed,
+//       gasPriceWei,
+//       eventId: firstTicket.eventId,
+//       organizerId: parentEvent?.organizer_id || null,
+//       userId: null,
+//       ticketTypeId: firstTicket.ticketTypeId,
+//       fromAddress: verifyResponse.from_address,
+//       toAddress: verifyResponse.to_address,
+//       amountWei: totalPaidWei.toString(),
+//       platformFeeWei: platformFeeWei.toString(),
+//       organizerAmountWei: organizerAmountWei.toString(),
+//       feePercentAtTime: currentPlatformFeePercent,
+//       purchaseId: ticket_order_id,
+//       ticketIds: pendingTickets.map(t => t.id),
+//       quantity: pendingTickets.length,
+//       paymentMethod: 'WALLET' // ✅ Default to wallet for now
+//     })
+
+//     console.log('✅ Transaction logged successfully')
+
+//     // ✅ PROCEED with minting process
+//     console.log('🎭 Starting minting process...')
+
+//     const updatedTickets = []
+
+//     for (let i = 0; i < pendingTickets.length; i++) {
+//       const ticket = pendingTickets[i]
+
+//       try {
+//         // ✅ SET status to MINTING
+//         ticket.status = TICKET_STATUS_ENUM[2] // MINTING
+//         await ticket.save()
+
+//         // ✅ CREATE metadata for this ticket
+//         const metadata = createSimpleMetadata(parentEvent, ticketType, ticket)
+
+//         // ✅ VALIDATE metadata before sending to IPFS
+//         if (!metadata || typeof metadata !== 'object') {
+//           throw new Error(`Invalid metadata generated for ticket ${i + 1}`)
+//         }
+
+//         console.log(`📋 Generated metadata for ticket ${i + 1}:`, {
+//           name: metadata.name,
+//           image: metadata.image,
+//           attributeCount: metadata.attributes?.length || 0,
+//           hasDescription: !!metadata.description
+//         })
+
+//         // ✅ UPLOAD metadata to IPFS
+//         const metadataString = JSON.stringify(metadata)
+
+//         if (
+//           !metadataString ||
+//           metadataString === '{}' ||
+//           metadataString.length < 10
+//         ) {
+//           throw new Error(
+//             `Generated metadata is empty or invalid for ticket ${i + 1}`
+//           )
+//         }
+
+//         console.log(
+//           `📤 Uploading metadata ${i + 1} to IPFS (${
+//             metadataString.length
+//           } chars)...`
+//         )
+
+//         // ✅ UPLOAD metadata to IPFS
+//         const ipfsResponse = await new Promise((resolve, reject) => {
+//           ipfsServiceClient.PinJSONToIPFS(
+//             {
+//               json_content: metadataString,
+//               options: {
+//                 pin_name: `ticket-mint-metadata-${ticket_order_id}-${i + 1}`
+//               }
+//             },
+//             { deadline: new Date(Date.now() + 15000) },
+//             (err, res) => {
+//               if (err) {
+//                 console.error(`❌ IPFS error for ticket ${i + 1}:`, {
+//                   error: err.message,
+//                   code: err.code,
+//                   metadataLength: metadataString.length,
+//                   metadataPreview: metadataString.substring(0, 200)
+//                 })
+//                 reject(err)
+//               } else {
+//                 console.log(`✅ IPFS success for ticket ${i + 1}:`, {
+//                   hash: res.ipfs_hash,
+//                   size: res.pin_size_bytes
+//                 })
+//                 resolve(res)
+//               }
+//             }
+//           )
+//         })
+
+//         const metadataCid = ipfsResponse.ipfs_hash
+//         const fullTokenUri = `ipfs://${metadataCid}`
+
+//         console.log(`📁 Metadata uploaded for ticket ${i + 1}:`, {
+//           cid: metadataCid,
+//           uri: fullTokenUri
+//         })
+
+//         // ✅ MINT NFT on blockchain
+//         const mintResponse = await new Promise((resolve, reject) => {
+//           blockchainServiceClient.MintTicket(
+//             {
+//               buyer_address: ticket.ownerAddress,
+//               token_uri_cid: fullTokenUri,
+//               blockchain_ticket_type_id: ticketType.blockchainTicketTypeId,
+//               session_id_for_contract: ticketType.contractSessionId
+//             },
+//             { deadline: new Date(Date.now() + 30000) },
+//             (err, res) => {
+//               if (err) reject(err)
+//               else resolve(res)
+//             }
+//           )
+//         })
+
+//         if (mintResponse.success) {
+//           // ✅ UPDATE ticket with mint info
+//           ticket.status = TICKET_STATUS_ENUM[4] // MINTED
+//           ticket.tokenId = mintResponse.token_id
+//           ticket.tokenUriCid = fullTokenUri
+
+//           // ✅ AUTO-GENERATE QR CODE after successful mint
+//           try {
+//             const qrData = generateQRCodeData(ticket.id, ticket.ownerAddress)
+//             ticket.qrCodeData = qrData.qrCodeData
+//             ticket.qrCodeSecret = qrData.secret
+//             console.log(`✅ QR code generated for ticket ${ticket.id}`)
+//           } catch (qrError) {
+//             console.warn(
+//               `⚠️ QR code generation failed for ticket ${ticket.id}:`,
+//               qrError
+//             )
+//           }
+
+//           await ticket.save()
+
+//           console.log(`✅ Ticket ${i + 1} minted successfully:`, {
+//             ticketId: ticket.id,
+//             tokenId: mintResponse.token_id,
+//             transactionHash: mintResponse.transaction_hash
+//           })
+
+//           updatedTickets.push(ticket)
+//         } else {
+//           throw new Error(
+//             `Minting failed: ${mintResponse.message || 'Unknown error'}`
+//           )
+//         }
+//       } catch (mintError) {
+//         console.error(`❌ Minting failed for ticket ${i + 1}:`, mintError)
+
+//         // ✅ SET ticket to MINT_FAILED
+//         ticket.status = TICKET_STATUS_ENUM[3] // MINT_FAILED
+//         await ticket.save()
+
+//         // Continue with other tickets rather than failing completely
+//       }
+//     }
+
+//     if (updatedTickets.length === 0) {
+//       return callback({
+//         code: grpc.status.INTERNAL,
+//         message: 'All tickets failed to mint'
+//       })
+//     }
+
+//     console.log(
+//       `✅ Successfully minted ${updatedTickets.length}/${pendingTickets.length} tickets`
+//     )
+
+//     // ✅ RETURN success response
+//     callback(null, {
+//       tickets: updatedTickets.map(ticketDocumentToGrpcTicket)
+//     })
+//   } catch (error) {
+//     console.error('❌ ConfirmPaymentAndRequestMint error:', error)
+
+//     let errorMessage = 'Failed to confirm payment and mint tickets'
+//     let statusCode = grpc.status.INTERNAL
+
+//     if (error.message?.includes('Purchase order not found')) {
+//       errorMessage = 'Ticket order not found or invalid'
+//       statusCode = grpc.status.NOT_FOUND
+//     } else if (
+//       error.message?.includes('not confirmed') ||
+//       error.message?.includes('failed on blockchain')
+//     ) {
+//       errorMessage = 'Transaction not confirmed on blockchain'
+//       statusCode = grpc.status.FAILED_PRECONDITION
+//     } else if (
+//       error.message?.includes('Invalid') ||
+//       error.message?.includes('required')
+//     ) {
+//       statusCode = grpc.status.INVALID_ARGUMENT
+//     } else if (error.message?.includes('Metadata not prepared')) {
+//       statusCode = grpc.status.FAILED_PRECONDITION
+//     }
+
+//     // ✅ LOG failed transaction
+//     try {
+//       await TransactionLogger.logTicketPurchase({
+//         transactionHash: payment_transaction_hash || '',
+//         eventId: ticketType?.eventId,
+//         organizerId: null,
+//         userId: null,
+//         ticketTypeId: ticketType?.id,
+//         fromAddress: pendingTickets[0]?.ownerAddress,
+//         toAddress: process.env.CONTRACT_ADDRESS?.toLowerCase(),
+//         amountWei: '0',
+//         platformFeeWei: '0',
+//         organizerAmountWei: '0',
+//         feePercentAtTime: 0,
+//         purchaseId: ticket_order_id,
+//         ticketIds: pendingTickets.map(t => t.id),
+//         quantity: pendingTickets.length,
+//         paymentMethod: 'WALLET',
+//         failureReason: error.message
+//       })
+//     } catch (logError) {
+//       console.error('Failed to log failed transaction:', logError)
+//     }
+
+//     callback({
+//       code: statusCode,
+//       message: errorMessage
+//     })
+//   }
+// }
+
 async function ConfirmPaymentAndRequestMint (call, callback) {
   const { ticket_order_id, payment_transaction_hash } = call.request
 
@@ -1076,7 +1443,8 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
       ticketTypeId: ticketType.id,
       name: ticketType.name,
       priceWei: ticketType.priceWei,
-      eventId: ticketType.eventId
+      eventId: ticketType.eventId,
+      currentAvailableQuantity: ticketType.availableQuantity
     })
 
     // ✅ VERIFY blockchain transaction để get gas info
@@ -1297,7 +1665,11 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
 
           // ✅ AUTO-GENERATE QR CODE after successful mint
           try {
-            const qrData = generateQRCodeData(ticket.id, ticket.ownerAddress)
+            const qrData = generateQRCodeData({
+              ticketId: ticket.id,
+              eventId: ticket.eventId,
+              ownerAddress: ticket.ownerAddress
+            })
             ticket.qrCodeData = qrData.qrCodeData
             ticket.qrCodeSecret = qrData.secret
             console.log(`✅ QR code generated for ticket ${ticket.id}`)
@@ -1344,6 +1716,40 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
       `✅ Successfully minted ${updatedTickets.length}/${pendingTickets.length} tickets`
     )
 
+    // ✅ NEW: UPDATE TICKET TYPE AVAILABILITY AFTER SUCCESSFUL MINTING
+    try {
+      // Tính lại số lượng đã bán thực tế
+      const soldTicketsCount = await Ticket.countDocuments({
+        ticketTypeId: ticketType.id,
+        status: { $in: ['PAID', 'MINTING', 'MINTED'] }
+      })
+
+      const newAvailableQuantity = Math.max(
+        0,
+        ticketType.totalQuantity - soldTicketsCount
+      )
+
+      // Cập nhật availability trong database
+      await TicketType.findByIdAndUpdate(ticketType.id, {
+        availableQuantity: newAvailableQuantity
+      })
+
+      console.log(`✅ TicketType availability updated:`, {
+        ticketTypeId: ticketType.id,
+        previousAvailability: ticketType.availableQuantity,
+        newAvailability: newAvailableQuantity,
+        totalQuantity: ticketType.totalQuantity,
+        soldTicketsCount: soldTicketsCount,
+        justMinted: updatedTickets.length
+      })
+    } catch (availabilityError) {
+      console.error(
+        '❌ Failed to update ticket type availability:',
+        availabilityError
+      )
+      // Không throw error vì minting đã thành công, chỉ log warning
+    }
+
     // ✅ RETURN success response
     callback(null, {
       tickets: updatedTickets.map(ticketDocumentToGrpcTicket)
@@ -1376,10 +1782,10 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
     try {
       await TransactionLogger.logTicketPurchase({
         transactionHash: payment_transaction_hash || '',
-        eventId: ticketType?.eventId,
+        eventId: firstTicket?.eventId,
         organizerId: null,
         userId: null,
-        ticketTypeId: ticketType?.id,
+        ticketTypeId: firstTicket?.ticketTypeId,
         fromAddress: pendingTickets[0]?.ownerAddress,
         toAddress: process.env.CONTRACT_ADDRESS?.toLowerCase(),
         amountWei: '0',
@@ -1387,8 +1793,8 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
         organizerAmountWei: '0',
         feePercentAtTime: 0,
         purchaseId: ticket_order_id,
-        ticketIds: pendingTickets.map(t => t.id),
-        quantity: pendingTickets.length,
+        ticketIds: pendingTickets?.map(t => t.id) || [],
+        quantity: pendingTickets?.length || 0,
         paymentMethod: 'WALLET',
         failureReason: error.message
       })

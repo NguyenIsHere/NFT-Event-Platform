@@ -1,5 +1,5 @@
 // 05-ticket-service/src/handlers/ticketTypeServiceHandlers.js (KHUNG SƯỜN CHI TIẾT HƠN)
-const { TicketType } = require('../models/Ticket')
+const { Ticket, TicketType, TICKET_STATUS_ENUM } = require('../models/Ticket')
 const grpc = require('@grpc/grpc-js')
 const mongoose = require('mongoose')
 const eventServiceClient = require('../clients/eventServiceClient') // Import eventServiceClient
@@ -308,11 +308,48 @@ async function ListTicketTypesByEvent (call, callback) {
         message: 'Invalid event_id format.'
       })
     }
+
     const ticketTypes = await TicketType.find({ eventId: event_id }).sort({
       createdAt: 1
     })
+
+    // ✅ NEW: Calculate real availability for each ticket type
+    const ticketTypesWithRealAvailability = await Promise.all(
+      ticketTypes.map(async ticketType => {
+        const soldTicketsCount = await Ticket.countDocuments({
+          ticketTypeId: ticketType._id.toString(),
+          status: { $in: ['PAID', 'MINTING', 'MINTED'] }
+        })
+
+        const realAvailableQuantity = Math.max(
+          0,
+          ticketType.totalQuantity - soldTicketsCount
+        )
+
+        // Update availability in database if different
+        if (ticketType.availableQuantity !== realAvailableQuantity) {
+          await TicketType.findByIdAndUpdate(
+            ticketType._id,
+            { availableQuantity: realAvailableQuantity },
+            { new: false }
+          )
+          console.log(
+            `TicketType ${ticketType._id} availability updated: ${realAvailableQuantity}`
+          )
+        }
+
+        // Return updated ticket type
+        return {
+          ...ticketType.toJSON(),
+          availableQuantity: realAvailableQuantity
+        }
+      })
+    )
+
     callback(null, {
-      ticket_types: ticketTypes.map(tt => ticketTypeToProto(tt))
+      ticket_types: ticketTypesWithRealAvailability.map(tt =>
+        ticketTypeToProto(tt)
+      )
     })
   } catch (error) {
     console.error('TicketService: ListTicketTypesByEvent RPC error:', error)
@@ -333,19 +370,55 @@ async function ListTicketTypesBySession (call, callback) {
       !mongoose.Types.ObjectId.isValid(event_id) ||
       (session_id && !mongoose.Types.ObjectId.isValid(session_id))
     ) {
-      // Giả sử session_id cũng là ObjectId nếu nó là _id của Mongoose
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
         message: 'Invalid event_id or session_id format.'
       })
     }
+
     const query = { eventId: event_id }
     if (session_id) {
       query.sessionId = session_id
     }
+
     const ticketTypes = await TicketType.find(query).sort({ createdAt: 1 })
+
+    // ✅ NEW: Calculate real availability for each ticket type
+    const ticketTypesWithRealAvailability = await Promise.all(
+      ticketTypes.map(async ticketType => {
+        const soldTicketsCount = await Ticket.countDocuments({
+          ticketTypeId: ticketType._id.toString(),
+          status: { $in: ['PAID', 'MINTING', 'MINTED'] }
+        })
+
+        const realAvailableQuantity = Math.max(
+          0,
+          ticketType.totalQuantity - soldTicketsCount
+        )
+
+        // Update availability in database if different
+        if (ticketType.availableQuantity !== realAvailableQuantity) {
+          await TicketType.findByIdAndUpdate(
+            ticketType._id,
+            { availableQuantity: realAvailableQuantity },
+            { new: false }
+          )
+          console.log(
+            `TicketType ${ticketType._id} availability updated: ${realAvailableQuantity}`
+          )
+        }
+
+        return {
+          ...ticketType.toJSON(),
+          availableQuantity: realAvailableQuantity
+        }
+      })
+    )
+
     callback(null, {
-      ticket_types: ticketTypes.map(tt => ticketTypeToProto(tt))
+      ticket_types: ticketTypesWithRealAvailability.map(tt =>
+        ticketTypeToProto(tt)
+      )
     })
   } catch (error) {
     console.error(
@@ -382,8 +455,7 @@ async function GetTicketTypeWithAvailability (call, callback) {
       })
     }
 
-    // ✅ FIX: Import Ticket model để tính toán real availability
-    const { Ticket } = require('../models/Ticket')
+    // ✅ REMOVE: const { Ticket } = require('../models/Ticket') - đã import ở đầu file
 
     // Calculate real available quantity from actual tickets
     const soldTicketsCount = await Ticket.countDocuments({
