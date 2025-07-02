@@ -73,6 +73,15 @@ service BlockchainService {
       get: "/v1/admin/platform/balance"
     };
   }
+
+  // Check ticket type availability on contract
+  rpc CheckTicketTypeAvailability(CheckTicketTypeAvailabilityRequest) returns (CheckTicketTypeAvailabilityResponse);
+
+  // Check if purchase is possible for multiple ticket types
+  rpc CheckPurchaseAvailability(CheckPurchaseAvailabilityRequest) returns (CheckPurchaseAvailabilityResponse);
+
+  // Sync availability from contract to database
+  rpc SyncTicketTypeAvailability(SyncTicketTypeAvailabilityRequest) returns (SyncTicketTypeAvailabilityResponse);
 }
 
 // ----- Messages -----
@@ -238,4 +247,40 @@ message GetContractBalanceResponse {
   string contract_balance_wei = 1;
   string total_platform_fees_wei = 2;
   uint32 platform_fee_percent = 3;
+}
+
+// ✅ NEW: Availability checking messages
+message CheckTicketTypeAvailabilityRequest {
+  string blockchain_ticket_type_id = 1;
+}
+
+message CheckTicketTypeAvailabilityResponse {
+  string blockchain_ticket_type_id = 1;
+  uint32 remaining_quantity = 2;
+  string price_wei = 3;
+  string name = 4;
+  bool exists = 5;
+}
+
+message CheckPurchaseAvailabilityRequest {
+  repeated string ticket_type_ids = 1;
+  repeated uint32 quantities = 2;
+}
+
+message CheckPurchaseAvailabilityResponse {
+  bool can_purchase = 1;
+  string reason = 2;
+  int64 checked_at = 3;
+}
+
+message SyncTicketTypeAvailabilityRequest {
+  string blockchain_ticket_type_id = 1;
+}
+
+message SyncTicketTypeAvailabilityResponse {
+  string blockchain_ticket_type_id = 1;
+  uint32 contract_remaining = 2;
+  string contract_price_wei = 3;
+  string contract_name = 4;
+  int64 synced_at = 5;
 }

@@ -1176,6 +1176,119 @@ async function GetContractBalance (call, callback) {
   }
 }
 
+// ✅ NEW: Check ticket type availability on contract
+async function CheckTicketTypeAvailability (call, callback) {
+  const { blockchain_ticket_type_id } = call.request
+
+  console.log(
+    `CheckTicketTypeAvailability called for: ${blockchain_ticket_type_id}`
+  )
+
+  try {
+    const ticketTypeIdBN = BigInt(blockchain_ticket_type_id)
+
+    // Get availability from contract
+    const availabilityInfo =
+      await eventTicketNFTContract.getTicketTypeAvailability(ticketTypeIdBN)
+    const [remaining, price, exists, name] = availabilityInfo
+
+    if (!exists) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Ticket type not found on contract'
+      })
+    }
+
+    callback(null, {
+      blockchain_ticket_type_id: blockchain_ticket_type_id,
+      remaining_quantity: Number(remaining),
+      price_wei: price.toString(),
+      name: name,
+      exists: exists
+    })
+  } catch (error) {
+    console.error('CheckTicketTypeAvailability error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to check availability on contract'
+    })
+  }
+}
+
+// ✅ NEW: Check availability for multiple ticket types before purchase
+async function CheckPurchaseAvailability (call, callback) {
+  const { ticket_type_ids, quantities } = call.request
+
+  console.log(`CheckPurchaseAvailability called for:`, {
+    ticket_type_ids,
+    quantities
+  })
+
+  try {
+    // Convert to BigInt arrays
+    const ticketTypeIdsBN = ticket_type_ids.map(id => BigInt(id))
+    const quantitiesBN = quantities.map(q => BigInt(q))
+
+    // Check availability on contract
+    const [canPurchase, reason] =
+      await eventTicketNFTContract.checkAvailabilityForPurchase(
+        ticketTypeIdsBN,
+        quantitiesBN
+      )
+
+    callback(null, {
+      can_purchase: canPurchase,
+      reason: reason,
+      checked_at: Math.floor(Date.now() / 1000)
+    })
+  } catch (error) {
+    console.error('CheckPurchaseAvailability error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to check purchase availability'
+    })
+  }
+}
+
+// ✅ NEW: Sync availability from contract to database
+async function SyncTicketTypeAvailability (call, callback) {
+  const { blockchain_ticket_type_id } = call.request
+
+  console.log(
+    `SyncTicketTypeAvailability called for: ${blockchain_ticket_type_id}`
+  )
+
+  try {
+    const ticketTypeIdBN = BigInt(blockchain_ticket_type_id)
+
+    // Get current availability from contract
+    const availabilityInfo =
+      await eventTicketNFTContract.getTicketTypeAvailability(ticketTypeIdBN)
+    const [remaining, price, exists, name] = availabilityInfo
+
+    if (!exists) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Ticket type not found on contract'
+      })
+    }
+
+    callback(null, {
+      blockchain_ticket_type_id: blockchain_ticket_type_id,
+      contract_remaining: Number(remaining),
+      contract_price_wei: price.toString(),
+      contract_name: name,
+      synced_at: Math.floor(Date.now() / 1000)
+    })
+  } catch (error) {
+    console.error('SyncTicketTypeAvailability error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to sync availability from contract'
+    })
+  }
+}
+
 // Export updated functions
 module.exports = {
   RegisterEventOnBlockchain,
@@ -1190,5 +1303,8 @@ module.exports = {
   GetEventRevenue,
   SetPlatformFee,
   GetPlatformFee,
-  GetContractBalance
+  GetContractBalance,
+  CheckTicketTypeAvailability,
+  CheckPurchaseAvailability,
+  SyncTicketTypeAvailability
 }

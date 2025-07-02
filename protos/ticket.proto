@@ -199,6 +199,14 @@ service TicketService {
       get: "/v1/admin/transactions/{transaction_id}"
     };
   }
+
+  // ✅ NEW: Sync availability from contract
+  rpc SyncTicketTypeAvailability(SyncTicketTypeAvailabilityRequest) returns (SyncTicketTypeAvailabilityResponse) {
+    option (google.api.http) = {
+      post: "/v1/ticket-types/{ticket_type_id}/sync-availability"
+      body: "*"
+    };
+  }
 }
 
 // ✅ NEW: Transaction messages
@@ -438,6 +446,22 @@ message InitiatePurchaseResponse {
   string session_id_for_contract = 6;
   string token_uri_cid = 7; 
   string purchase_id = 8;
+  // ✅ NEW: Include availability info
+  uint32 contract_remaining = 9;
+  uint32 db_remaining = 10;
+}
+
+// ✅ NEW: Sync availability messages
+message SyncTicketTypeAvailabilityRequest {
+  string ticket_type_id = 1;
+}
+
+message SyncTicketTypeAvailabilityResponse {
+  string ticket_type_id = 1;
+  uint32 old_db_remaining = 2;
+  uint32 new_db_remaining = 3;
+  string contract_price_wei = 4;
+  int64 synced_at = 5;
 }
 
 message ConfirmPaymentAndRequestMintRequest {

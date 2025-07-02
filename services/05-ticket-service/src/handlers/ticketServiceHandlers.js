@@ -64,6 +64,137 @@ function ticketDocumentToGrpcTicket (ticketDoc) {
   }
 }
 
+// async function InitiatePurchase (call, callback) {
+//   const {
+//     ticket_type_id,
+//     buyer_address,
+//     quantity = 1,
+//     selected_seats
+//   } = call.request
+
+//   try {
+//     // ✅ VALIDATE inputs (giữ nguyên validation logic)
+//     if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
+//       return callback({
+//         code: grpc.status.INVALID_ARGUMENT,
+//         message: 'Invalid ticket type ID format.'
+//       })
+//     }
+
+//     const ticketType = await TicketType.findById(ticket_type_id)
+//     if (!ticketType) {
+//       return callback({
+//         code: grpc.status.NOT_FOUND,
+//         message: 'Ticket type not found.'
+//       })
+//     }
+
+//     // ✅ CHECK availability (real-time từ Ticket collection)
+//     const soldTicketsCount = await Ticket.countDocuments({
+//       ticketTypeId: ticket_type_id,
+//       status: { $in: ['PAID', 'MINTING', 'MINTED'] }
+//     })
+
+//     const availableQuantity = ticketType.totalQuantity - soldTicketsCount
+
+//     if (availableQuantity < quantity) {
+//       return callback({
+//         code: grpc.status.FAILED_PRECONDITION,
+//         message: `Not enough tickets available. Only ${availableQuantity} left.`
+//       })
+//     }
+
+//     // ✅ GENERATE unique order ID
+//     const ticketOrderId = `${Date.now()}-${Math.random()
+//       .toString(36)
+//       .substr(2, 9)}`
+
+//     // ✅ GET payment details từ blockchain service
+//     const paymentDetails = await new Promise((resolve, reject) => {
+//       blockchainServiceClient.GetTicketPaymentDetails(
+//         {
+//           blockchain_event_id: ticketType.blockchainEventId,
+//           price_wei_from_ticket_type: ticketType.priceWei
+//         },
+//         (err, res) => {
+//           if (err) reject(err)
+//           else resolve(res)
+//         }
+//       )
+//     })
+
+//     // ✅ CREATE PENDING tickets trực tiếp (không cần Purchase)
+//     const ticketsToCreate = []
+
+//     for (let i = 0; i < quantity; i++) {
+//       const ticketData = {
+//         eventId: ticketType.eventId,
+//         ticketTypeId: ticket_type_id,
+//         ownerAddress: buyer_address.toLowerCase(),
+//         sessionId: ticketType.sessionId,
+//         status: TICKET_STATUS_ENUM[0], // PENDING_PAYMENT
+//         // ✅ ADD: Store order info trong metadata
+//         metadata: {
+//           ticketOrderId,
+//           orderIndex: i,
+//           totalQuantity: quantity
+//         }
+//       }
+
+//       // ✅ ADD seat info if provided
+//       if (selected_seats && selected_seats[i]) {
+//         const seatKey = selected_seats[i]
+//         const [section, row, seat] = seatKey.split('-')
+//         ticketData.seatInfo = {
+//           seatKey,
+//           section,
+//           row,
+//           seat
+//         }
+//       }
+
+//       ticketsToCreate.push(ticketData)
+//     }
+
+//     // ✅ SAVE pending tickets
+//     const savedTickets = await Ticket.insertMany(ticketsToCreate)
+
+//     // ✅ LOG: Initial purchase transaction (INITIATED)
+//     await TransactionLogger.logTicketPurchase({
+//       transactionHash: '', // Chưa có transaction hash
+//       eventId: ticketType.eventId,
+//       organizerId: null, // Sẽ được fill sau
+//       userId: null,
+//       ticketTypeId: ticket_type_id,
+//       fromAddress: buyer_address,
+//       toAddress: paymentDetails.payment_contract_address,
+//       amountWei: (parseFloat(ticketType.priceWei) * quantity).toString(),
+//       platformFeeWei: '0', // Sẽ được tính từ contract
+//       organizerAmountWei: '0', // Sẽ được tính từ contract
+//       feePercentAtTime: 0, // Sẽ được lấy từ contract
+//       purchaseId: ticketOrderId, // ✅ CHANGE: Dùng ticket order ID
+//       ticketIds: savedTickets.map(t => t.id),
+//       quantity
+//     })
+
+//     callback(null, {
+//       ticket_order_id: ticketOrderId,
+//       payment_contract_address: paymentDetails.payment_contract_address,
+//       price_to_pay_wei: (parseFloat(ticketType.priceWei) * quantity).toString(),
+//       blockchain_event_id: ticketType.blockchainEventId,
+//       blockchain_ticket_type_id: ticketType.blockchainTicketTypeId,
+//       session_id_for_contract: ticketType.contractSessionId,
+//       purchase_id: ticketOrderId // ✅ DEPRECATED: Để backward compatibility
+//     })
+//   } catch (error) {
+//     console.error('❌ InitiatePurchase error:', error)
+//     callback({
+//       code: grpc.status.INTERNAL,
+//       message: error.message || 'Failed to initiate purchase'
+//     })
+//   }
+// }
+
 async function InitiatePurchase (call, callback) {
   const {
     ticket_type_id,
@@ -73,11 +204,11 @@ async function InitiatePurchase (call, callback) {
   } = call.request
 
   try {
-    // ✅ VALIDATE inputs (giữ nguyên validation logic)
+    // ✅ VALIDATE inputs
     if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
-        message: 'Invalid ticket type ID format.'
+        message: 'Invalid ticket_type_id format.'
       })
     }
 
@@ -89,27 +220,104 @@ async function InitiatePurchase (call, callback) {
       })
     }
 
-    // ✅ CHECK availability (real-time từ Ticket collection)
+    // ✅ NEW: Check if ticket type is published to blockchain
+    if (
+      !ticketType.blockchainTicketTypeId ||
+      ticketType.blockchainTicketTypeId === ''
+    ) {
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: 'Ticket type must be published to blockchain before purchase'
+      })
+    }
+
+    // ✅ NEW: Check availability on contract first
+    console.log(
+      `🔍 Checking contract availability for ticket type: ${ticketType.blockchainTicketTypeId}`
+    )
+
+    const contractAvailability = await new Promise((resolve, reject) => {
+      blockchainServiceClient.CheckTicketTypeAvailability(
+        { blockchain_ticket_type_id: ticketType.blockchainTicketTypeId },
+        (err, res) => {
+          if (err) reject(err)
+          else resolve(res)
+        }
+      )
+    })
+
+    if (!contractAvailability.exists) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Ticket type not found on blockchain contract'
+      })
+    }
+
+    if (contractAvailability.remaining_quantity < quantity) {
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: `Insufficient tickets available. Only ${contractAvailability.remaining_quantity} tickets remaining on contract`
+      })
+    }
+
+    console.log(
+      `✅ Contract has ${contractAvailability.remaining_quantity} tickets available`
+    )
+
+    // ✅ NEW: Double-check with purchase availability (for atomic check)
+    const purchaseCheck = await new Promise((resolve, reject) => {
+      blockchainServiceClient.CheckPurchaseAvailability(
+        {
+          ticket_type_ids: [ticketType.blockchainTicketTypeId],
+          quantities: [quantity]
+        },
+        (err, res) => {
+          if (err) reject(err)
+          else resolve(res)
+        }
+      )
+    })
+
+    if (!purchaseCheck.can_purchase) {
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: `Purchase not available: ${purchaseCheck.reason}`
+      })
+    }
+
+    console.log(`✅ Purchase availability confirmed on contract`)
+
+    // ✅ EXISTING: Database availability check (for consistency)
     const soldTicketsCount = await Ticket.countDocuments({
       ticketTypeId: ticket_type_id,
       status: { $in: ['PAID', 'MINTING', 'MINTED'] }
     })
 
-    const availableQuantity = ticketType.totalQuantity - soldTicketsCount
+    const dbAvailableQuantity = ticketType.totalQuantity - soldTicketsCount
 
-    if (availableQuantity < quantity) {
-      return callback({
-        code: grpc.status.FAILED_PRECONDITION,
-        message: `Not enough tickets available. Only ${availableQuantity} left.`
-      })
+    if (dbAvailableQuantity < quantity) {
+      console.warn(
+        `⚠️ Database shows ${dbAvailableQuantity} available, but contract shows ${contractAvailability.remaining_quantity}`
+      )
+
+      // ✅ Trust contract availability but update database
+      if (contractAvailability.remaining_quantity >= quantity) {
+        console.log(`📊 Updating database availability to match contract`)
+        ticketType.availableQuantity = contractAvailability.remaining_quantity
+        await ticketType.save()
+      } else {
+        return callback({
+          code: grpc.status.FAILED_PRECONDITION,
+          message: `Insufficient tickets available in both database and contract`
+        })
+      }
     }
 
-    // ✅ GENERATE unique order ID
+    // ✅ PROCEED with existing logic...
     const ticketOrderId = `${Date.now()}-${Math.random()
       .toString(36)
       .substr(2, 9)}`
 
-    // ✅ GET payment details từ blockchain service
     const paymentDetails = await new Promise((resolve, reject) => {
       blockchainServiceClient.GetTicketPaymentDetails(
         {
@@ -123,58 +331,64 @@ async function InitiatePurchase (call, callback) {
       )
     })
 
-    // ✅ CREATE PENDING tickets trực tiếp (không cần Purchase)
+    // ✅ CREATE PENDING tickets
     const ticketsToCreate = []
 
     for (let i = 0; i < quantity; i++) {
-      const ticketData = {
+      const seatInfo =
+        selected_seats && selected_seats[i]
+          ? {
+              seatKey: selected_seats[i],
+              section: selected_seats[i].split('-')[0],
+              row: selected_seats[i].split('-')[1],
+              seat: selected_seats[i].split('-')[2]
+            }
+          : undefined
+
+      ticketsToCreate.push({
         eventId: ticketType.eventId,
         ticketTypeId: ticket_type_id,
         ownerAddress: buyer_address.toLowerCase(),
         sessionId: ticketType.sessionId,
         status: TICKET_STATUS_ENUM[0], // PENDING_PAYMENT
-        // ✅ ADD: Store order info trong metadata
-        metadata: {
-          ticketOrderId,
-          orderIndex: i,
-          totalQuantity: quantity
-        }
-      }
-
-      // ✅ ADD seat info if provided
-      if (selected_seats && selected_seats[i]) {
-        const seatKey = selected_seats[i]
-        const [section, row, seat] = seatKey.split('-')
-        ticketData.seatInfo = {
-          seatKey,
-          section,
-          row,
-          seat
-        }
-      }
-
-      ticketsToCreate.push(ticketData)
+        seatInfo,
+        metadata: new Map([
+          ['ticketOrderId', ticketOrderId],
+          ['orderIndex', i.toString()],
+          [
+            'contractRemainingAtTime',
+            contractAvailability.remaining_quantity.toString()
+          ], // ✅ NEW: Track contract state
+          ['dbRemainingAtTime', dbAvailableQuantity.toString()], // ✅ NEW: Track DB state
+          ['checkedAt', Date.now().toString()]
+        ])
+      })
     }
 
-    // ✅ SAVE pending tickets
     const savedTickets = await Ticket.insertMany(ticketsToCreate)
 
-    // ✅ LOG: Initial purchase transaction (INITIATED)
+    // ✅ LOG: Initial purchase transaction with contract info
     await TransactionLogger.logTicketPurchase({
-      transactionHash: '', // Chưa có transaction hash
+      transactionHash: '',
       eventId: ticketType.eventId,
-      organizerId: null, // Sẽ được fill sau
+      organizerId: null,
       userId: null,
       ticketTypeId: ticket_type_id,
       fromAddress: buyer_address,
       toAddress: paymentDetails.payment_contract_address,
       amountWei: (parseFloat(ticketType.priceWei) * quantity).toString(),
-      platformFeeWei: '0', // Sẽ được tính từ contract
-      organizerAmountWei: '0', // Sẽ được tính từ contract
-      feePercentAtTime: 0, // Sẽ được lấy từ contract
-      purchaseId: ticketOrderId, // ✅ CHANGE: Dùng ticket order ID
+      platformFeeWei: '0',
+      organizerAmountWei: '0',
+      feePercentAtTime: 0,
+      purchaseId: ticketOrderId,
       ticketIds: savedTickets.map(t => t.id),
-      quantity
+      quantity,
+      metadata: {
+        contractRemainingAtTime:
+          contractAvailability.remaining_quantity.toString(),
+        dbRemainingAtTime: dbAvailableQuantity.toString(),
+        contractPriceWei: contractAvailability.price_wei
+      }
     })
 
     callback(null, {
@@ -184,13 +398,79 @@ async function InitiatePurchase (call, callback) {
       blockchain_event_id: ticketType.blockchainEventId,
       blockchain_ticket_type_id: ticketType.blockchainTicketTypeId,
       session_id_for_contract: ticketType.contractSessionId,
-      purchase_id: ticketOrderId // ✅ DEPRECATED: Để backward compatibility
+      purchase_id: ticketOrderId,
+      // ✅ NEW: Include availability info for frontend
+      contract_remaining: contractAvailability.remaining_quantity,
+      db_remaining: dbAvailableQuantity
     })
   } catch (error) {
     console.error('❌ InitiatePurchase error:', error)
     callback({
       code: grpc.status.INTERNAL,
       message: error.message || 'Failed to initiate purchase'
+    })
+  }
+}
+
+// ✅ NEW: Function to sync availability from contract
+async function SyncTicketTypeAvailability (call, callback) {
+  const { ticket_type_id } = call.request
+
+  try {
+    if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Invalid ticket_type_id format.'
+      })
+    }
+
+    const ticketType = await TicketType.findById(ticket_type_id)
+    if (!ticketType) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Ticket type not found.'
+      })
+    }
+
+    if (!ticketType.blockchainTicketTypeId) {
+      return callback({
+        code: grpc.status.FAILED_PRECONDITION,
+        message: 'Ticket type not published to blockchain'
+      })
+    }
+
+    // Get availability from contract
+    const contractSync = await new Promise((resolve, reject) => {
+      blockchainServiceClient.SyncTicketTypeAvailability(
+        { blockchain_ticket_type_id: ticketType.blockchainTicketTypeId },
+        (err, res) => {
+          if (err) reject(err)
+          else resolve(res)
+        }
+      )
+    })
+
+    // Update database with contract data
+    const oldAvailability = ticketType.availableQuantity
+    ticketType.availableQuantity = contractSync.contract_remaining
+    await ticketType.save()
+
+    console.log(
+      `📊 Synced availability for ${ticketType.name}: ${oldAvailability} → ${contractSync.contract_remaining}`
+    )
+
+    callback(null, {
+      ticket_type_id: ticket_type_id,
+      old_db_remaining: oldAvailability,
+      new_db_remaining: contractSync.contract_remaining,
+      contract_price_wei: contractSync.contract_price_wei,
+      synced_at: contractSync.synced_at
+    })
+  } catch (error) {
+    console.error('❌ SyncTicketTypeAvailability error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to sync availability'
     })
   }
 }
@@ -1036,373 +1316,6 @@ async function GetMyTicketsWithDetails (call, callback) {
   }
 }
 
-// async function ConfirmPaymentAndRequestMint (call, callback) {
-//   const { ticket_order_id, payment_transaction_hash } = call.request
-
-//   try {
-//     console.log('🔄 ConfirmPaymentAndRequestMint called:', {
-//       ticket_order_id,
-//       payment_transaction_hash
-//     })
-
-//     // ✅ FIND pending tickets by order ID (thay vì Purchase)
-//     const pendingTickets = await Ticket.find({
-//       'metadata.ticketOrderId': ticket_order_id,
-//       status: TICKET_STATUS_ENUM[0] // PENDING_PAYMENT
-//     }).sort({ 'metadata.orderIndex': 1 })
-
-//     if (!pendingTickets || pendingTickets.length === 0) {
-//       return callback({
-//         code: grpc.status.NOT_FOUND,
-//         message: `No pending tickets found for order: ${ticket_order_id}`
-//       })
-//     }
-
-//     console.log(
-//       `✅ Found ${pendingTickets.length} pending tickets for order: ${ticket_order_id}`
-//     )
-
-//     const firstTicket = pendingTickets[0]
-//     const ticketType = await TicketType.findById(firstTicket.ticketTypeId)
-
-//     if (!ticketType) {
-//       return callback({
-//         code: grpc.status.NOT_FOUND,
-//         message: 'Ticket type not found'
-//       })
-//     }
-
-//     console.log('🔍 Processing order for ticket type:', {
-//       ticketTypeId: ticketType.id,
-//       name: ticketType.name,
-//       priceWei: ticketType.priceWei,
-//       eventId: ticketType.eventId
-//     })
-
-//     // ✅ VERIFY blockchain transaction để get gas info
-//     let transactionDetails = null
-//     let gasUsed = null
-//     let gasPriceWei = null
-
-//     const verifyResponse = await new Promise((resolve, reject) => {
-//       blockchainServiceClient.VerifyTransaction(
-//         { transaction_hash: payment_transaction_hash },
-//         (err, res) => {
-//           if (err) reject(err)
-//           else resolve(res)
-//         }
-//       )
-//     })
-
-//     if (verifyResponse.is_confirmed && verifyResponse.success_on_chain) {
-//       transactionDetails = verifyResponse
-//       // ✅ TODO: Extract gas info từ blockchain service nếu available
-//       gasUsed = verifyResponse.gas_used
-//       gasPriceWei = verifyResponse.gas_price_wei
-//     } else {
-//       console.log('verify failed')
-//     }
-
-//     console.log('✅ Transaction verified successfully:', {
-//       blockNumber: verifyResponse.block_number,
-//       valueWei: verifyResponse.value_wei,
-//       from: verifyResponse.from_address,
-//       to: verifyResponse.to_address
-//     })
-
-//     // ✅ GET current platform fee từ contract
-//     const feeResponse = await new Promise((resolve, reject) => {
-//       blockchainServiceClient.GetPlatformFee({}, (err, res) => {
-//         if (err) reject(err)
-//         else resolve(res)
-//       })
-//     })
-
-//     const currentPlatformFeePercent = feeResponse.fee_percent || 10
-
-//     // ✅ CALCULATE fees từ verified amount
-//     const totalPaidWei = parseFloat(verifyResponse.value_wei || '0')
-//     const platformFeeWei = Math.floor(
-//       (totalPaidWei * currentPlatformFeePercent) / 100
-//     )
-//     const organizerAmountWei = totalPaidWei - platformFeeWei
-
-//     console.log('💰 Fee calculation:', {
-//       totalPaidWei,
-//       currentPlatformFeePercent,
-//       platformFeeWei,
-//       organizerAmountWei
-//     })
-
-//     // ✅ UPDATE tickets to PAID
-//     await Ticket.updateMany(
-//       { 'metadata.ticketOrderId': ticket_order_id },
-//       {
-//         status: TICKET_STATUS_ENUM[1], // PAID
-//         transactionHash: payment_transaction_hash
-//       }
-//     )
-
-//     console.log(`✅ Updated ${pendingTickets.length} tickets to PAID status`)
-
-//     // ✅ GET parent event for organizer info
-//     let parentEvent = null
-//     try {
-//       const eventResponse = await new Promise((resolve, reject) => {
-//         eventServiceClient.GetEvent(
-//           { event_id: ticketType.eventId },
-//           { deadline: new Date(Date.now() + 10000) },
-//           (err, res) => {
-//             if (err) reject(err)
-//             else resolve(res)
-//           }
-//         )
-//       })
-//       parentEvent = eventResponse.event
-//     } catch (eventError) {
-//       console.warn('Could not fetch parent event:', eventError)
-//     }
-
-//     // ✅ LOG: Confirmed purchase transaction
-//     await TransactionLogger.logTicketPurchase({
-//       transactionHash: payment_transaction_hash,
-//       blockNumber: verifyResponse.block_number,
-//       gasUsed,
-//       gasPriceWei,
-//       eventId: firstTicket.eventId,
-//       organizerId: parentEvent?.organizer_id || null,
-//       userId: null,
-//       ticketTypeId: firstTicket.ticketTypeId,
-//       fromAddress: verifyResponse.from_address,
-//       toAddress: verifyResponse.to_address,
-//       amountWei: totalPaidWei.toString(),
-//       platformFeeWei: platformFeeWei.toString(),
-//       organizerAmountWei: organizerAmountWei.toString(),
-//       feePercentAtTime: currentPlatformFeePercent,
-//       purchaseId: ticket_order_id,
-//       ticketIds: pendingTickets.map(t => t.id),
-//       quantity: pendingTickets.length,
-//       paymentMethod: 'WALLET' // ✅ Default to wallet for now
-//     })
-
-//     console.log('✅ Transaction logged successfully')
-
-//     // ✅ PROCEED with minting process
-//     console.log('🎭 Starting minting process...')
-
-//     const updatedTickets = []
-
-//     for (let i = 0; i < pendingTickets.length; i++) {
-//       const ticket = pendingTickets[i]
-
-//       try {
-//         // ✅ SET status to MINTING
-//         ticket.status = TICKET_STATUS_ENUM[2] // MINTING
-//         await ticket.save()
-
-//         // ✅ CREATE metadata for this ticket
-//         const metadata = createSimpleMetadata(parentEvent, ticketType, ticket)
-
-//         // ✅ VALIDATE metadata before sending to IPFS
-//         if (!metadata || typeof metadata !== 'object') {
-//           throw new Error(`Invalid metadata generated for ticket ${i + 1}`)
-//         }
-
-//         console.log(`📋 Generated metadata for ticket ${i + 1}:`, {
-//           name: metadata.name,
-//           image: metadata.image,
-//           attributeCount: metadata.attributes?.length || 0,
-//           hasDescription: !!metadata.description
-//         })
-
-//         // ✅ UPLOAD metadata to IPFS
-//         const metadataString = JSON.stringify(metadata)
-
-//         if (
-//           !metadataString ||
-//           metadataString === '{}' ||
-//           metadataString.length < 10
-//         ) {
-//           throw new Error(
-//             `Generated metadata is empty or invalid for ticket ${i + 1}`
-//           )
-//         }
-
-//         console.log(
-//           `📤 Uploading metadata ${i + 1} to IPFS (${
-//             metadataString.length
-//           } chars)...`
-//         )
-
-//         // ✅ UPLOAD metadata to IPFS
-//         const ipfsResponse = await new Promise((resolve, reject) => {
-//           ipfsServiceClient.PinJSONToIPFS(
-//             {
-//               json_content: metadataString,
-//               options: {
-//                 pin_name: `ticket-mint-metadata-${ticket_order_id}-${i + 1}`
-//               }
-//             },
-//             { deadline: new Date(Date.now() + 15000) },
-//             (err, res) => {
-//               if (err) {
-//                 console.error(`❌ IPFS error for ticket ${i + 1}:`, {
-//                   error: err.message,
-//                   code: err.code,
-//                   metadataLength: metadataString.length,
-//                   metadataPreview: metadataString.substring(0, 200)
-//                 })
-//                 reject(err)
-//               } else {
-//                 console.log(`✅ IPFS success for ticket ${i + 1}:`, {
-//                   hash: res.ipfs_hash,
-//                   size: res.pin_size_bytes
-//                 })
-//                 resolve(res)
-//               }
-//             }
-//           )
-//         })
-
-//         const metadataCid = ipfsResponse.ipfs_hash
-//         const fullTokenUri = `ipfs://${metadataCid}`
-
-//         console.log(`📁 Metadata uploaded for ticket ${i + 1}:`, {
-//           cid: metadataCid,
-//           uri: fullTokenUri
-//         })
-
-//         // ✅ MINT NFT on blockchain
-//         const mintResponse = await new Promise((resolve, reject) => {
-//           blockchainServiceClient.MintTicket(
-//             {
-//               buyer_address: ticket.ownerAddress,
-//               token_uri_cid: fullTokenUri,
-//               blockchain_ticket_type_id: ticketType.blockchainTicketTypeId,
-//               session_id_for_contract: ticketType.contractSessionId
-//             },
-//             { deadline: new Date(Date.now() + 30000) },
-//             (err, res) => {
-//               if (err) reject(err)
-//               else resolve(res)
-//             }
-//           )
-//         })
-
-//         if (mintResponse.success) {
-//           // ✅ UPDATE ticket with mint info
-//           ticket.status = TICKET_STATUS_ENUM[4] // MINTED
-//           ticket.tokenId = mintResponse.token_id
-//           ticket.tokenUriCid = fullTokenUri
-
-//           // ✅ AUTO-GENERATE QR CODE after successful mint
-//           try {
-//             const qrData = generateQRCodeData(ticket.id, ticket.ownerAddress)
-//             ticket.qrCodeData = qrData.qrCodeData
-//             ticket.qrCodeSecret = qrData.secret
-//             console.log(`✅ QR code generated for ticket ${ticket.id}`)
-//           } catch (qrError) {
-//             console.warn(
-//               `⚠️ QR code generation failed for ticket ${ticket.id}:`,
-//               qrError
-//             )
-//           }
-
-//           await ticket.save()
-
-//           console.log(`✅ Ticket ${i + 1} minted successfully:`, {
-//             ticketId: ticket.id,
-//             tokenId: mintResponse.token_id,
-//             transactionHash: mintResponse.transaction_hash
-//           })
-
-//           updatedTickets.push(ticket)
-//         } else {
-//           throw new Error(
-//             `Minting failed: ${mintResponse.message || 'Unknown error'}`
-//           )
-//         }
-//       } catch (mintError) {
-//         console.error(`❌ Minting failed for ticket ${i + 1}:`, mintError)
-
-//         // ✅ SET ticket to MINT_FAILED
-//         ticket.status = TICKET_STATUS_ENUM[3] // MINT_FAILED
-//         await ticket.save()
-
-//         // Continue with other tickets rather than failing completely
-//       }
-//     }
-
-//     if (updatedTickets.length === 0) {
-//       return callback({
-//         code: grpc.status.INTERNAL,
-//         message: 'All tickets failed to mint'
-//       })
-//     }
-
-//     console.log(
-//       `✅ Successfully minted ${updatedTickets.length}/${pendingTickets.length} tickets`
-//     )
-
-//     // ✅ RETURN success response
-//     callback(null, {
-//       tickets: updatedTickets.map(ticketDocumentToGrpcTicket)
-//     })
-//   } catch (error) {
-//     console.error('❌ ConfirmPaymentAndRequestMint error:', error)
-
-//     let errorMessage = 'Failed to confirm payment and mint tickets'
-//     let statusCode = grpc.status.INTERNAL
-
-//     if (error.message?.includes('Purchase order not found')) {
-//       errorMessage = 'Ticket order not found or invalid'
-//       statusCode = grpc.status.NOT_FOUND
-//     } else if (
-//       error.message?.includes('not confirmed') ||
-//       error.message?.includes('failed on blockchain')
-//     ) {
-//       errorMessage = 'Transaction not confirmed on blockchain'
-//       statusCode = grpc.status.FAILED_PRECONDITION
-//     } else if (
-//       error.message?.includes('Invalid') ||
-//       error.message?.includes('required')
-//     ) {
-//       statusCode = grpc.status.INVALID_ARGUMENT
-//     } else if (error.message?.includes('Metadata not prepared')) {
-//       statusCode = grpc.status.FAILED_PRECONDITION
-//     }
-
-//     // ✅ LOG failed transaction
-//     try {
-//       await TransactionLogger.logTicketPurchase({
-//         transactionHash: payment_transaction_hash || '',
-//         eventId: ticketType?.eventId,
-//         organizerId: null,
-//         userId: null,
-//         ticketTypeId: ticketType?.id,
-//         fromAddress: pendingTickets[0]?.ownerAddress,
-//         toAddress: process.env.CONTRACT_ADDRESS?.toLowerCase(),
-//         amountWei: '0',
-//         platformFeeWei: '0',
-//         organizerAmountWei: '0',
-//         feePercentAtTime: 0,
-//         purchaseId: ticket_order_id,
-//         ticketIds: pendingTickets.map(t => t.id),
-//         quantity: pendingTickets.length,
-//         paymentMethod: 'WALLET',
-//         failureReason: error.message
-//       })
-//     } catch (logError) {
-//       console.error('Failed to log failed transaction:', logError)
-//     }
-
-//     callback({
-//       code: statusCode,
-//       message: errorMessage
-//     })
-//   }
-// }
-
 async function ConfirmPaymentAndRequestMint (call, callback) {
   const { ticket_order_id, payment_transaction_hash } = call.request
 
@@ -1829,6 +1742,7 @@ module.exports = {
   GetOrganizerAnalytics,
   LogRevenueSettlement,
   LogPlatformWithdraw,
-  GetAllTransactions, // ✅ NEW
-  GetTransactionDetails // ✅ NEW
+  GetAllTransactions,
+  GetTransactionDetails,
+  SyncTicketTypeAvailability
 }

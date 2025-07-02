@@ -10,9 +10,9 @@ contract EventTicketNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
     struct EventInfo {
         bool exists;
         string name;
-        address organizer; // ✅ Store organizer address
-        uint256 totalRevenue; // ✅ Track total revenue for this event
-        bool settled; // ✅ Track if event revenue has been settled
+        address organizer;
+        uint256 totalRevenue; 
+        bool settled; 
     }
     mapping(uint256 => EventInfo) public eventInfo;
 
@@ -34,9 +34,9 @@ contract EventTicketNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
     mapping(uint256 => TicketData) public tickets;
 
     /* ───── FLEXIBLE: Revenue Management ───── */
-    uint256 public platformFeePercent = 10; // ✅ FLEXIBLE: Default 10% but can be changed
-    uint256 public constant MAX_PLATFORM_FEE = 30; // ✅ Maximum 30% to prevent abuse
-    uint256 public totalPlatformFees = 0; // Total platform fees collected
+    uint256 public platformFeePercent = 10; 
+    uint256 public constant MAX_PLATFORM_FEE = 30; 
+    uint256 public totalPlatformFees = 0; 
     
     // Track revenue per event
     mapping(uint256 => uint256) public eventRevenue;
@@ -104,7 +104,7 @@ contract EventTicketNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
         emit EventCreated(eventId, eventName, organizer);
     }
 
-    /* ───── Existing: Create ticket type ───── */
+    /* ───── Create ticket type ───── */
     function createTicketType(
         uint256 eventId,
         string calldata typeName,
@@ -126,7 +126,7 @@ contract EventTicketNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
         return ticketTypeId;
     }
 
-    /* ───── Existing: Owner mint ───── */
+    /* ───── Owner mint ───── */
     function mintTicket(
         address to,
         string calldata uri,
@@ -152,7 +152,39 @@ contract EventTicketNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
         return tokenId;
     }
 
-    /* ───── Buy tickets with dynamic revenue tracking ───── */
+    /* ───── Check availability functions ───── */
+    function getTicketTypeAvailability(uint256 ticketTypeId) external view returns (
+        uint256 remaining,
+        uint256 price,
+        bool exists,
+        string memory name
+    ) {
+        TicketTypeInfo storage tt = ticketTypeInfo[ticketTypeId];
+        return (tt.remaining, tt.price, tt.exists, tt.name);
+    }
+
+    function checkAvailabilityForPurchase(
+        uint256[] calldata ticketTypeIds,
+        uint256[] calldata quantities
+    ) external view returns (bool canPurchase, string memory reason) {
+        require(ticketTypeIds.length == quantities.length, "Array mismatch");
+        
+        for (uint256 i = 0; i < ticketTypeIds.length; i++) {
+            TicketTypeInfo storage tt = ticketTypeInfo[ticketTypeIds[i]];
+            
+            if (!tt.exists) {
+                return (false, "Ticket type does not exist");
+            }
+            
+            if (tt.remaining < quantities[i]) {
+                return (false, string(abi.encodePacked("Insufficient quantity for ticket type ", ticketTypeIds[i])));
+            }
+        }
+        
+        return (true, "Available");
+    }
+
+    /* ───── buyTickets ───── */
     function buyTickets(
         string[] calldata uris,
         uint256[] calldata ticketTypeIds,
@@ -165,11 +197,11 @@ contract EventTicketNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
         uint256 totalCost;
         uint256 eventId;
         
-        // Calculate total cost and validate
+        // Pre-validate availability and calculate cost
         for (uint256 i = 0; i < n; ++i) {
             TicketTypeInfo storage tt = ticketTypeInfo[ticketTypeIds[i]];
             require(tt.exists, "TicketType not exists");
-            require(tt.remaining > 0, "Sold out");
+            require(tt.remaining > 0, "Sold out"); // Check each ticket individually
             totalCost += tt.price;
             
             if (i == 0) {
@@ -182,20 +214,23 @@ contract EventTicketNFT is ERC721URIStorage, Ownable, ReentrancyGuard {
         require(msg.value == totalCost, "Incorrect payment amount");
         require(eventInfo[eventId].exists, "Event not exists");
 
-        // ✅ DYNAMIC: Calculate platform fee using current rate
+        // DYNAMIC: Calculate platform fee using current rate
         uint256 platformFee = (totalCost * platformFeePercent) / 100;
         uint256 organizerRevenue = totalCost - platformFee;
 
-        // ✅ Update revenue tracking
+        // Update revenue tracking
         eventRevenue[eventId] += organizerRevenue;
         eventPlatformFees[eventId] += platformFee;
         totalPlatformFees += platformFee;
         eventInfo[eventId].totalRevenue += organizerRevenue;
 
-        // Mint tickets
+        // Mint tickets AND decrement availability atomically
         for (uint256 i = 0; i < n; ++i) {
             TicketTypeInfo storage tt = ticketTypeInfo[ticketTypeIds[i]];
-            tt.remaining--;
+            
+            // Double-check availability before decrementing
+            require(tt.remaining > 0, "Sold out during transaction");
+            tt.remaining--; // ✅ Decrement on contract
 
             uint256 tokenId = nextTokenId++;
             _safeMint(msg.sender, tokenId);

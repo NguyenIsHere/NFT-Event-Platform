@@ -436,6 +436,30 @@ routes:
       - name: jwt
         config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
 
+  # ✅ NEW: Sync ticket type availability route
+  - name: tickettype-sync-availability-route-v1
+    service: ticket-grpc-service
+    paths: ["~/v1/ticket-types/(?<ticket_type_id>[^/]+)/sync-availability$"]
+    methods: [POST]
+    strip_path: false
+    plugins:
+      - name: jwt
+        config: { key_claim_name: "iss", claims_to_verify: ["exp"] }
+
+  # ✅ NEW: Check contract availability route  
+  - name: blockchain-check-availability-route-v1
+    service: blockchain-grpc-service
+    paths: ["~/v1/blockchain/ticket-types/(?<blockchain_ticket_type_id>[^/]+)/availability$"]
+    methods: [GET]
+    strip_path: false
+
+  # ✅ NEW: Check purchase availability route
+  - name: blockchain-check-purchase-route-v1
+    service: blockchain-grpc-service
+    paths: ["~/v1/blockchain/check-purchase-availability$"]
+    methods: [POST]
+    strip_path: false
+
   # === SeatMap Service Routes ===
   - name: seatmap-create-for-event-route-v1
     service: seatmap-grpc-service

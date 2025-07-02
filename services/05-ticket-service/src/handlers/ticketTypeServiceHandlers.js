@@ -432,6 +432,61 @@ async function ListTicketTypesBySession (call, callback) {
   }
 }
 
+// async function GetTicketTypeWithAvailability (call, callback) {
+//   const { ticket_type_id } = call.request
+//   console.log(
+//     `TicketService: GetTicketTypeWithAvailability for ID: ${ticket_type_id}`
+//   )
+
+//   try {
+//     if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
+//       return callback({
+//         code: grpc.status.INVALID_ARGUMENT,
+//         message: 'Invalid ticket_type_id format.'
+//       })
+//     }
+
+//     // ✅ FIX: Implement the method properly
+//     const ticketType = await TicketType.findById(ticket_type_id)
+//     if (!ticketType) {
+//       return callback({
+//         code: grpc.status.NOT_FOUND,
+//         message: 'TicketType not found.'
+//       })
+//     }
+
+//     // ✅ REMOVE: const { Ticket } = require('../models/Ticket') - đã import ở đầu file
+
+//     // Calculate real available quantity from actual tickets
+//     const soldTicketsCount = await Ticket.countDocuments({
+//       ticketTypeId: ticket_type_id,
+//       status: { $in: ['PAID', 'MINTING', 'MINTED'] }
+//     })
+
+//     const realAvailableQuantity = Math.max(
+//       0,
+//       ticketType.totalQuantity - soldTicketsCount
+//     )
+
+//     // Update available quantity if needed
+//     if (ticketType.availableQuantity !== realAvailableQuantity) {
+//       ticketType.availableQuantity = realAvailableQuantity
+//       await ticketType.save()
+//       console.log(
+//         `TicketType ${ticket_type_id} availability updated: ${realAvailableQuantity}`
+//       )
+//     }
+
+//     callback(null, ticketTypeToProto(ticketType))
+//   } catch (error) {
+//     console.error('TicketService: GetTicketTypeWithAvailability error:', error)
+//     callback({
+//       code: grpc.status.INTERNAL,
+//       message: error.message || 'Failed to get ticket type with availability.'
+//     })
+//   }
+// }
+
 async function GetTicketTypeWithAvailability (call, callback) {
   const { ticket_type_id } = call.request
   console.log(
@@ -446,7 +501,6 @@ async function GetTicketTypeWithAvailability (call, callback) {
       })
     }
 
-    // ✅ FIX: Implement the method properly
     const ticketType = await TicketType.findById(ticket_type_id)
     if (!ticketType) {
       return callback({
@@ -455,26 +509,69 @@ async function GetTicketTypeWithAvailability (call, callback) {
       })
     }
 
-    // ✅ REMOVE: const { Ticket } = require('../models/Ticket') - đã import ở đầu file
+    // ✅ NEW: If published to blockchain, sync availability from contract
+    if (
+      ticketType.blockchainTicketTypeId &&
+      ticketType.blockchainTicketTypeId !== ''
+    ) {
+      try {
+        console.log(
+          `🔍 Syncing availability from contract for ticket type: ${ticketType.blockchainTicketTypeId}`
+        )
 
-    // Calculate real available quantity from actual tickets
-    const soldTicketsCount = await Ticket.countDocuments({
-      ticketTypeId: ticket_type_id,
-      status: { $in: ['PAID', 'MINTING', 'MINTED'] }
-    })
+        const contractSync = await new Promise((resolve, reject) => {
+          blockchainServiceClient.SyncTicketTypeAvailability(
+            { blockchain_ticket_type_id: ticketType.blockchainTicketTypeId },
+            (err, res) => {
+              if (err) {
+                console.warn(
+                  '⚠️ Failed to sync from contract, using database value:',
+                  err.message
+                )
+                resolve(null) // Continue with database value
+              } else {
+                resolve(res)
+              }
+            }
+          )
+        })
 
-    const realAvailableQuantity = Math.max(
-      0,
-      ticketType.totalQuantity - soldTicketsCount
-    )
+        if (contractSync) {
+          const oldAvailability = ticketType.availableQuantity
+          ticketType.availableQuantity = contractSync.contract_remaining
 
-    // Update available quantity if needed
-    if (ticketType.availableQuantity !== realAvailableQuantity) {
-      ticketType.availableQuantity = realAvailableQuantity
-      await ticketType.save()
-      console.log(
-        `TicketType ${ticket_type_id} availability updated: ${realAvailableQuantity}`
+          if (oldAvailability !== contractSync.contract_remaining) {
+            await ticketType.save()
+            console.log(
+              `📊 Updated availability from contract: ${oldAvailability} → ${contractSync.contract_remaining}`
+            )
+          }
+        }
+      } catch (syncError) {
+        console.warn(
+          '⚠️ Contract sync failed, using database availability:',
+          syncError.message
+        )
+      }
+    } else {
+      // ✅ FALLBACK: Calculate from database if not published
+      const soldTicketsCount = await Ticket.countDocuments({
+        ticketTypeId: ticket_type_id,
+        status: { $in: ['PAID', 'MINTING', 'MINTED'] }
+      })
+
+      const realAvailableQuantity = Math.max(
+        0,
+        ticketType.totalQuantity - soldTicketsCount
       )
+
+      if (ticketType.availableQuantity !== realAvailableQuantity) {
+        ticketType.availableQuantity = realAvailableQuantity
+        await ticketType.save()
+        console.log(
+          `📊 Updated availability from database calculation: ${realAvailableQuantity}`
+        )
+      }
     }
 
     callback(null, ticketTypeToProto(ticketType))
