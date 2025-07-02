@@ -12,7 +12,22 @@ async function generateResponse (userMessage, contextPrompt) {
   try {
     const systemPrompt = `Bạn là một chatbot hỗ trợ cho NFT Event Platform. 
     Bạn giúp người dùng tìm hiểu về các sự kiện, vé, và thông tin liên quan.
-    Hãy trả lời bằng tiếng Việt một cách thân thiện và chính xác.
+    
+    QUY TẮC TRẢ LỜI:
+    - Trả lời bằng tiếng Việt một cách NGẮN GỌN và TRỰC TIẾP
+    - KHÔNG sử dụng định dạng Markdown (*, **, #, -, etc.)
+    - KHÔNG viết dài dòng hay lặp lại thông tin
+    - ĐI THẲNG VÀO VẤN ĐỀ và trả lời cụ thể
+    - Nếu không có dữ liệu, chỉ nói "Không tìm thấy" thay vì giải thích dài
+    - Không sử dụng emoji hay ký tự đặc biệt
+    - KHÔNG sử dụng từ ngữ như "tôi nghĩ", "có thể", "có lẽ" - chỉ nói sự thật
+    - KHÔNG sử dụng từ ngữ như "tôi thấy", "theo tôi", "theo dữ liệu" - chỉ nói thông tin
+    - KHÔNG sử dụng từ ngữ như "tôi đã kiểm tra", "sau khi tìm kiếm" - chỉ nói kết quả
+    - KHÔNG bao gồm các thông tin như id, timestamp, hay metadata không cần thiết
+
+    VÍ DỤ:
+    - Thay vì: "Sau khi tìm kiếm trên hệ thống, tôi thấy có 3 sự kiện..."
+    - Hãy nói: "Có 3 sự kiện âm nhạc nhưng tất cả đã kết thúc."
     
     ${contextPrompt}
     
@@ -29,10 +44,12 @@ async function generateResponse (userMessage, contextPrompt) {
         }
       ],
       generationConfig: {
-        temperature: 0.7,
+        temperature: 0.3, // Giảm từ 0.7 để ít sáng tạo hơn, tập trung vào sự thật
         topP: 0.8,
         topK: 40,
-        maxOutputTokens: 1024
+        maxOutputTokens: 300, // Giảm từ 1024 để bắt buộc trả lời ngắn
+        candidateCount: 1,
+        stopSequences: ['\n\n\n'] // Dừng khi có quá nhiều dòng trống
       }
     }
 
