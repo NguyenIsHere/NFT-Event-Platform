@@ -146,40 +146,85 @@ const COUNT_PATTERNS = [
   'total'
 ]
 
-async function detectIntent (message) {
-  const lowerMessage = message.toLowerCase()
-  const detectedFilters = []
+// ✅ THÊM: Query classification patterns
+const HIGH_CARDINALITY_PATTERNS = [
+  'những sự kiện nào',
+  'có những',
+  'danh sách',
+  'tất cả',
+  'bao nhiêu',
+  'có mấy',
+  'liệt kê',
+  'kể tên',
+  'có gì',
+  'nào đang',
+  'nào có',
+  'tổng cộng',
+  'tổng số',
+  'số lượng'
+];
+
+// ✅ THÊM: Query classification function
+function classifyQueryType(message) {
+  const lowerMessage = message.toLowerCase();
+  
+  const isHighCardinality = HIGH_CARDINALITY_PATTERNS.some(pattern => 
+    lowerMessage.includes(pattern)
+  );
+  
+  // Detect location queries
+  const isLocationQuery = LOCATION_PATTERNS.some(pattern =>
+    lowerMessage.includes(pattern.toLowerCase())
+  );
+  
+  // Detect count queries
+  const isCountQuery = COUNT_PATTERNS.some(pattern =>
+    lowerMessage.includes(pattern.toLowerCase())
+  );
+  
+  return {
+    isHighCardinality,
+    queryType: isHighCardinality ? 'LISTING' : 'SPECIFIC',
+    isLocationQuery,
+    isCountQuery
+  };
+}
+
+// ✅ CẬP NHẬT: detectIntent function
+async function detectIntent(message) {
+  const lowerMessage = message.toLowerCase();
+  const detectedFilters = [];
   const detectedIntents = {
     isLocationQuery: false,
     isTimeQuery: false,
     isCountQuery: false,
     isAvailabilityQuery: false,
-    isStatusQuery: false // ✅ THÊM: Status query detection
-  }
+    isStatusQuery: false
+  };
 
   // 1. Detect content types based on keywords
   for (const [type, keywords] of Object.entries(INTENT_PATTERNS)) {
     const hasKeyword = keywords.some(keyword =>
       lowerMessage.includes(keyword.toLowerCase())
-    )
+    );
 
     if (hasKeyword) {
-      detectedFilters.push(type)
+      detectedFilters.push(type);
     }
   }
 
   // 2. Detect query types
   detectedIntents.isLocationQuery = LOCATION_PATTERNS.some(pattern =>
     lowerMessage.includes(pattern.toLowerCase())
-  )
+  );
 
   detectedIntents.isTimeQuery = TIME_PATTERNS.some(pattern =>
     lowerMessage.includes(pattern.toLowerCase())
-  )
+  );
 
   detectedIntents.isCountQuery = COUNT_PATTERNS.some(pattern =>
     lowerMessage.includes(pattern.toLowerCase())
-  )
+  );
 
   detectedIntents.isAvailabilityQuery = [
     'còn',
@@ -188,44 +233,46 @@ async function detectIntent (message) {
     'sold out',
     'có thể',
     'can'
-  ].some(pattern => lowerMessage.includes(pattern.toLowerCase()))
+  ].some(pattern => lowerMessage.includes(pattern.toLowerCase()));
 
-  // ✅ THÊM: Status query detection
   detectedIntents.isStatusQuery = STATUS_PATTERNS.some(pattern =>
     lowerMessage.includes(pattern.toLowerCase())
-  )
+  );
 
   // 3. Smart defaults based on context
   if (detectedFilters.length === 0) {
-    // Nếu không detect được gì, ưu tiên events
     if (detectedIntents.isLocationQuery || detectedIntents.isTimeQuery) {
-      detectedFilters.push('event')
+      detectedFilters.push('event');
     } else if (detectedIntents.isCountQuery) {
-      // "Bao nhiêu" có thể là events hoặc tickets
-      detectedFilters.push('event', 'ticket')
+      detectedFilters.push('event', 'ticket');
     } else {
-      // Default: search tất cả (trừ users vì privacy)
-      detectedFilters.push('event', 'ticket')
+      detectedFilters.push('event', 'ticket');
     }
   }
 
   // 4. Remove users từ default search (privacy)
   if (detectedFilters.includes('user') && detectedFilters.length > 1) {
-    detectedFilters.splice(detectedFilters.indexOf('user'), 1)
+    detectedFilters.splice(detectedFilters.indexOf('user'), 1);
   }
+
+  // ✅ THÊM: Query type classification
+  const queryType = classifyQueryType(message);
 
   console.log(
     `Intent Detection: "${message}" -> filters: [${detectedFilters.join(
       ', '
     )}], intents:`,
-    detectedIntents
-  )
+    detectedIntents,
+    `queryType: ${queryType.queryType}`
+  );
 
   return {
     filters: detectedFilters,
     intents: detectedIntents,
+    queryType: queryType.queryType,
+    isHighCardinality: queryType.isHighCardinality,
     confidence: calculateIntentConfidence(lowerMessage, detectedFilters)
-  }
+  };
 }
 
 function calculateIntentConfidence (message, detectedFilters) {
@@ -287,5 +334,6 @@ async function detectIntentWithEmbeddings (message) {
 module.exports = {
   detectIntent,
   detectIntentWithEmbeddings,
+  classifyQueryType,
   INTENT_PATTERNS
 }

@@ -12,14 +12,12 @@ service ChatbotService {
     };
   }
   
-// ✅ THÊM: HTTP annotation cho GetChatHistory
   rpc GetChatHistory(ChatHistoryRequest) returns (ChatHistoryResponse) {
     option (google.api.http) = {
       get: "/v1/chat/history"
     };
   }
   
-  // ✅ THÊM: HTTP annotation cho IndexData
   rpc IndexData(IndexDataRequest) returns (IndexDataResponse) {
     option (google.api.http) = {
       post: "/v1/chat/index"
@@ -32,7 +30,7 @@ message ChatRequest {
   string message = 1;
   string user_id = 2;
   string session_id = 3;
-  repeated string context_filters = 4; // Optional - will auto-detect if empty
+  repeated string context_filters = 4;
 }
 
 message ChatResponse {
@@ -40,7 +38,10 @@ message ChatResponse {
   string session_id = 2;
   repeated ContextSource sources = 3;
   double confidence_score = 4;
-  repeated string detected_filters = 5; // ✅ THÊM: Return detected filters
+  repeated string detected_filters = 5;
+  // ✅ THÊM: Query type và summary info
+  string query_type = 6; // "SPECIFIC" hoặc "LISTING"
+  SummaryInfo summary_info = 7;
 }
 
 message ContextSource {
@@ -50,8 +51,18 @@ message ContextSource {
   double relevance_score = 4;
 }
 
+// ✅ THÊM: Summary info cho high-cardinality queries
+message SummaryInfo {
+  int32 total_events = 1;
+  int32 total_tickets = 2;
+  int32 active_events = 3;
+  int32 sold_tickets = 4;
+  repeated string sample_items = 5; // Ví dụ tiêu biểu
+  bool is_aggregated = 6; // Có phải kết quả đã được tổng hợp không
+}
+
 message IndexDataRequest {
-  string data_type = 1; // "events", "tickets", "users" or empty for all
+  string data_type = 1;
   bool force_reindex = 2;
 }
 
@@ -78,5 +89,8 @@ message ChatMessage {
   string message = 4;
   string response = 5;
   int64 timestamp = 6;
-  repeated string detected_filters = 7; // ✅ THÊM: Include in history
+  repeated string detected_filters = 7;
+  // ✅ THÊM: Query type và summary
+  string query_type = 8;
+  SummaryInfo summary_info = 9;
 }

@@ -8,31 +8,42 @@ if (!GEMINI_API_KEY) {
   process.exit(1)
 }
 
-async function generateResponse (userMessage, contextPrompt) {
+async function generateResponse (userMessage, contextPrompt, queryType = 'SPECIFIC') {
   try {
-    const systemPrompt = `Bạn là một chatbot hỗ trợ cho NFT Event Platform. 
-    Bạn giúp người dùng tìm hiểu về các sự kiện, vé, và thông tin liên quan.
-    
-    QUY TẮC TRẢ LỜI:
-    - Trả lời bằng tiếng Việt một cách NGẮN GỌN và TRỰC TIẾP
-    - KHÔNG sử dụng định dạng Markdown (*, **, #, -, etc.)
-    - KHÔNG viết dài dòng hay lặp lại thông tin
-    - ĐI THẲNG VÀO VẤN ĐỀ và trả lời cụ thể
-    - Trả lời một cách thân thiện nhưng không quá sáng tạo
-    - Nếu không có dữ liệu, chỉ nói "Không tìm thấy" thay vì giải thích dài
-    - Không sử dụng emoji hay ký tự đặc biệt
-    - KHÔNG sử dụng từ ngữ như "tôi nghĩ", "có thể", "có lẽ" - chỉ nói sự thật
-    - KHÔNG sử dụng từ ngữ như "tôi thấy", "theo tôi", "theo dữ liệu" - chỉ nói thông tin
-    - KHÔNG sử dụng từ ngữ như "tôi đã kiểm tra", "sau khi tìm kiếm" - chỉ nói kết quả
-    - KHÔNG bao gồm các thông tin như id, timestamp, hay metadata không cần thiết
+    // ✅ CẬP NHẬT: Adaptive system prompt based on query type
+    let systemPrompt = `Bạn là một chatbot hỗ trợ cho NFT Event Platform. 
+    Bạn giúp người dùng tìm hiểu về các sự kiện, vé, và thông tin liên quan.`;
 
-    VÍ DỤ:
-    - Thay vì: "Sau khi tìm kiếm trên hệ thống, tôi thấy có 3 sự kiện..."
-    - Hãy nói: "Có 3 sự kiện âm nhạc nhưng tất cả đã kết thúc."
+    if (queryType === 'LISTING') {
+      systemPrompt += `
+      
+      QUY TẮC TRẢ LỜI CHO CÂU HỎI TỔNG QUAN:
+      - Khi được hỏi về danh sách/những gì: trả lời bằng số liệu tổng quan
+      - Nhóm kết quả theo loại (sự kiện, vé, etc.)
+      - Đưa ra ví dụ tiêu biểu thay vì liệt kê tất cả
+      - Sử dụng format: "Có X sự kiện, Y vé. Ví dụ: A, B, C"
+      - Trả lời ngắn gọn và trực tiếp
+      - KHÔNG sử dụng định dạng Markdown
+      - KHÔNG viết dài dòng hay lặp lại thông tin`;
+    } else {
+      systemPrompt += `
+      
+      QUY TẮC TRẢ LỜI CHO CÂU HỎI CỤ THỂ:
+      - Trả lời chi tiết và chính xác
+      - Đi thẳng vào vấn đề
+      - Trả lời bằng tiếng Việt một cách NGẮN GỌN và TRỰC TIẾP
+      - KHÔNG sử dụng định dạng Markdown (*, **, #, -, etc.)
+      - KHÔNG viết dài dòng hay lặp lại thông tin
+      - Nếu không có dữ liệu, chỉ nói "Không tìm thấy" thay vì giải thích dài
+      - Không sử dụng emoji hay ký tự đặc biệt
+      - KHÔNG sử dụng từ ngữ như "tôi nghĩ", "có thể", "có lẽ" - chỉ nói sự thật`;
+    }
+
+    systemPrompt += `
     
     ${contextPrompt}
     
-    Câu hỏi của người dùng: ${userMessage}`
+    Câu hỏi của người dùng: ${userMessage}`;
 
     const requestBody = {
       contents: [
@@ -45,12 +56,12 @@ async function generateResponse (userMessage, contextPrompt) {
         }
       ],
       generationConfig: {
-        temperature: 0.5, // Giảm từ 0.7 để ít sáng tạo hơn, tập trung vào sự thật
+        temperature: 0.5,
         topP: 0.8,
         topK: 40,
-        maxOutputTokens: 1024, // Giảm từ 1024 để bắt buộc trả lời ngắn
+        maxOutputTokens: queryType === 'LISTING' ? 512 : 1024, // Ngắn hơn cho listing queries
         candidateCount: 1,
-        stopSequences: ['\n\n\n'] // Dừng khi có quá nhiều dòng trống
+        stopSequences: ['\n\n\n']
       }
     }
 

@@ -7,18 +7,38 @@ const chatHistorySchema = new mongoose.Schema(
     sessionId: { type: String, required: true, index: true },
     message: { type: String, required: true },
     response: { type: String, required: true },
-    // ✅ FIX: Sửa sources schema để match với data structure
     sources: [
       {
-        _id: false, // Disable mongoose _id for subdocuments
-        type: { type: String, required: true }, // 'event', 'ticket', 'user'
-        id: { type: String, required: true }, // ID của record
-        title: { type: String, required: true }, // Title/name
-        content: { type: String, default: '' }, // Content description
-        score: { type: Number, default: 0 } // Relevance score
+        type: {
+          type: String,
+          enum: ['event', 'ticket', 'user']
+        },
+        id: String,
+        title: String,
+        content: String,
+        score: Number,
+        additionalInfo: mongoose.Schema.Types.Mixed
       }
     ],
-    detectedFilters: [String], // Auto-detected filters
+    detectedFilters: [
+      {
+        type: String,
+        enum: ['event', 'ticket', 'user']
+      }
+    ],
+    queryType: {
+      type: String,
+      enum: ['SPECIFIC', 'LISTING'],
+      default: 'SPECIFIC'
+    },
+    summaryInfo: {
+      total_events: Number,
+      total_tickets: Number,
+      active_events: Number,
+      sold_tickets: Number,
+      sample_items: [String],
+      is_aggregated: Boolean
+    },
     confidence: { type: Number, default: 0.8 },
     createdAt: { type: Date, default: Date.now }
   },
@@ -46,32 +66,15 @@ async function saveChatMessage (chatData) {
 
     const chatHistory = new ChatHistory(chatData)
     await chatHistory.save()
-    console.log(`ChatHistory saved successfully: ${chatData.id}`)
+    console.log(`✅ Chat message saved: ${chatData.id}`)
     return chatHistory
   } catch (error) {
-    console.error('Error saving chat history:', error)
-
-    // ✅ FALLBACK: Save without sources if schema error
-    if (error.name === 'ValidationError' && error.message.includes('sources')) {
-      console.warn(
-        'Attempting to save chat history without sources due to validation error'
-      )
-      try {
-        const fallbackData = { ...chatData, sources: [] }
-        const fallbackHistory = new ChatHistory(fallbackData)
-        await fallbackHistory.save()
-        console.log(`ChatHistory saved without sources: ${chatData.id}`)
-        return fallbackHistory
-      } catch (fallbackError) {
-        console.error('Fallback save also failed:', fallbackError)
-        throw fallbackError
-      }
-    }
+    console.error('❌ Error saving chat message:', error)
     throw error
   }
 }
 
-async function getChatHistory (userId, sessionId, limit = 50) {
+async function getChatHistory (userId, sessionId = null, limit = 50) {
   try {
     const query = { userId }
     if (sessionId) {
@@ -83,10 +86,11 @@ async function getChatHistory (userId, sessionId, limit = 50) {
       .limit(limit)
       .lean()
 
+    console.log(`✅ Retrieved ${messages.length} chat messages for user ${userId}`)
     return messages.reverse() // Return in chronological order
   } catch (error) {
-    console.error('Error getting chat history:', error)
-    throw error
+    console.error('❌ Error retrieving chat history:', error)
+    return []
   }
 }
 

@@ -4,24 +4,85 @@ const eventClient = require('../clients/eventClient')
 const userClient = require('../clients/userClient')
 const ticketClient = require('../clients/ticketClient')
 
-async function searchSimilarContent (query, contextFilters = [], topK = 5) {
+// ✅ THÊM: Token estimation function
+function estimateTokens(text) {
+  // Rough estimation: 1 token ≈ 4 characters for Vietnamese
+  return Math.ceil(text.length / 4);
+}
+
+// ✅ THÊM: Context truncation function
+function truncateContext(contextData, maxTokens = 4000) {
+  let totalTokens = 0;
+  const truncatedData = [];
+  
+  for (const item of contextData) {
+    const itemTokens = estimateTokens(item.content);
+    
+    if (totalTokens + itemTokens > maxTokens) {
+      break; // Dừng khi vượt quá limit
+    }
+    
+    truncatedData.push(item);
+    totalTokens += itemTokens;
+  }
+  
+  console.log(`Context truncated: ${contextData.length} -> ${truncatedData.length} items (${totalTokens} tokens)`);
+  return truncatedData;
+}
+
+// ✅ THÊM: Create summary info function
+function createSummaryInfo(contextData) {
+  const eventCount = contextData.filter(item => item.type === 'event').length;
+  const ticketCount = contextData.filter(item => item.type === 'ticket').length;
+  
+  const activeEvents = contextData
+    .filter(item => item.type === 'event' && item.additionalInfo?.is_active)
+    .length;
+    
+  const soldTickets = contextData
+    .filter(item => item.type === 'ticket' && item.additionalInfo?.status === 'PAID')
+    .length;
+  
+  const sampleItems = contextData
+    .slice(0, 3)
+    .map(item => item.title);
+  
+  return {
+    total_events: eventCount,
+    total_tickets: ticketCount,
+    active_events: activeEvents,
+    sold_tickets: soldTickets,
+    sample_items: sampleItems,
+    is_aggregated: contextData.length > 5
+  };
+}
+
+// ✅ CẬP NHẬT: searchSimilarContent function
+async function searchSimilarContent(query, contextFilters = [], topK = 5, queryType = 'SPECIFIC') {
   try {
     // 1. Generate embedding cho query
-    const queryEmbedding = await generateEmbedding(query)
+    const queryEmbedding = await generateEmbedding(query);
 
     // 2. Tạo filter cho Pinecone dựa trên contextFilters
-    const filter = buildPineconeFilter(contextFilters)
+    const filter = buildPineconeFilter(contextFilters);
+
+    // ✅ THÊM: Adaptive topK based on query type
+    const adaptiveTopK = queryType === 'LISTING' ? Math.min(topK * 3, 15) : topK;
+    console.log(`Searching with topK: ${adaptiveTopK} (queryType: ${queryType})`);
 
     // 3. Search trong vector DB
-    const vectorResults = await queryVectors(queryEmbedding, topK, filter)
+    const vectorResults = await queryVectors(queryEmbedding, adaptiveTopK, filter);
 
     // 4. Enrich kết quả với data từ các service
-    const enrichedResults = await enrichResultsWithServiceData(vectorResults)
+    const enrichedResults = await enrichResultsWithServiceData(vectorResults);
 
-    return enrichedResults
+    // ✅ THÊM: Truncate context if needed
+    const truncatedResults = truncateContext(enrichedResults);
+
+    return truncatedResults;
   } catch (error) {
-    console.error('Error in searchSimilarContent:', error)
-    throw error
+    console.error('Error in searchSimilarContent:', error);
+    throw error;
   }
 }
 
@@ -129,6 +190,75 @@ async function enrichResultsWithServiceData (vectorResults) {
   return enrichedResults
 }
 
-module.exports = {
-  searchSimilarContent
+// ✅ THÊM: Build aggregated context function
+function buildAggregatedContext(contextData, detectedFilters) {
+  if (contextData.length === 0) {
+    return {
+      prompt: "Không có thông tin liên quan trong cơ sở dữ liệu.",
+      summaryInfo: null
+    };
+  }
+  
+  const summaryInfo = createSummaryInfo(contextData);
+  
+  let prompt = `Dựa trên thông tin tổng hợp từ hệ thống NFT Event Platform`;
+  
+  if (detectedFilters.length > 0) {
+    prompt += ` (tìm kiếm trong: ${detectedFilters.join(', ')})`;
+  }
+  
+  prompt += ':\n\n';
+  
+  // Tạo summary thay vì liệt kê chi tiết
+  prompt += `Tổng cộng: ${summaryInfo.total_events} sự kiện, ${summaryInfo.total_tickets} vé\n`;
+  prompt += `- Sự kiện đang mở bán: ${summaryInfo.active_events}\n`;
+  prompt += `- Vé đã bán: ${summaryInfo.sold_tickets}\n`;
+  
+  if (summaryInfo.sample_items.length > 0) {
+    prompt += `- Ví dụ: ${summaryInfo.sample_items.join(', ')}\n`;
+  }
+  
+  prompt += '\nHãy trả lời câu hỏi một cách tổng quan và đưa ra số liệu cụ thể. ';
+  prompt += 'Nếu có quá nhiều kết quả, hãy nhóm theo loại và đưa ra ví dụ tiêu biểu.';
+  
+  return { prompt, summaryInfo };
 }
+
+// ✅ THÊM: Build detailed context function
+function buildDetailedContext(contextData, detectedFilters) {
+  if (contextData.length === 0) {
+    return {
+      prompt: "Không có thông tin liên quan trong cơ sở dữ liệu.",
+      summaryInfo: null
+    };
+  }
+  
+  const summaryInfo = createSummaryInfo(contextData);
+  
+  let prompt = `Dựa trên thông tin sau từ hệ thống NFT Event Platform`;
+  
+  if (detectedFilters.length > 0) {
+    prompt += ` (tìm kiếm trong: ${detectedFilters.join(', ')})`;
+  }
+  
+  prompt += ':\n\n';
+
+  contextData.forEach((item, index) => {
+    prompt += `${index + 1}. ${item.type.toUpperCase()}: ${item.title}\n`;
+    prompt += `   ${item.content}\n\n`;
+  });
+
+  prompt += 'Hãy trả lời câu hỏi dựa trên thông tin trên một cách chính xác và hữu ích. ';
+  prompt += 'Nếu thông tin không đầy đủ để trả lời, hãy nói rõ điều đó và đưa ra gợi ý.';
+
+  return { prompt, summaryInfo };
+}
+
+// ✅ CẬP NHẬT: Export new functions
+module.exports = {
+  searchSimilarContent,
+  buildAggregatedContext,
+  buildDetailedContext,
+  createSummaryInfo,
+  truncateContext
+};
