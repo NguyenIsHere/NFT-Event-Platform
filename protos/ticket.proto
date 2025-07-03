@@ -108,8 +108,10 @@ service TicketService {
   }
 
   rpc GenerateQRCode (GenerateQRCodeRequest) returns (GenerateQRCodeResponse) {
+    // ✅ FIX: Thêm HTTP rule để Kong tự động ánh xạ body
     option (google.api.http) = {
       post: "/v1/tickets/{ticket_id}/qr-code"
+      body: "*"
     };
   }
     
@@ -502,21 +504,53 @@ message CheckInRequest {
   string scanner_id = 3;
 }
 
+// ✅ CheckInResponse with verification method
 message CheckInResponse {
   bool success = 1;
   string message = 2;
   Ticket ticket = 3;
+  string verification_method = 4; // Always "DIGITAL_SIGNATURE"
 }
 
+// ✅ SIMPLIFIED: GenerateQRCodeRequest with only secure options
 message GenerateQRCodeRequest {
   string ticket_id = 1;
+  string qr_type = 2; // Always "SECURE_SIGNATURE"
+  SecureQRData secure_qr_data = 3; // Required: secure QR generation data
+
+    // ✅ NEW: Direct fields for HTTP compatibility
+  string address = 4;
+  string message = 5;
+  string signature = 6;
+  string ticket_id_data = 7;
+  string event_id_data = 8;
+  int64 timestamp = 9;
+  string nonce = 10;
+  string qr_image_base64 = 11;
 }
 
+// ✅ ENHANCED: SecureQRData message với validation fields
+message SecureQRData {
+  string address = 1;
+  string message = 2;
+  string signature = 3;
+  string ticket_id = 4;
+  string event_id = 5;
+  int64 timestamp = 6;
+  string nonce = 7;
+  string qr_image_base64 = 8; // Optional: pre-generated image
+  string verification_status = 9; // Optional: verification result
+}
+
+// ✅ ENHANCED: GenerateQRCodeResponse với validation info
 message GenerateQRCodeResponse {
   bool success = 1;
   string message = 2;
   string qr_code_data = 3;
   string qr_code_image_base64 = 4;
+  string qr_type = 5; // Always "SECURE_SIGNATURE"
+  int64 generated_at = 6; // Timestamp when QR was generated
+  int64 expires_at = 7; // When QR expires (24h later)
 }
 
 message ListAllTicketsRequest {

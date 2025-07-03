@@ -7,9 +7,13 @@ const blockchainServiceClient = require('../clients/blockchainServiceClient')
 const eventServiceClient = require('../clients/eventServiceClient')
 
 const {
-  generateQRCodeData,
+  generateQRCodeImage,
+  verifySecureQRData,
+  extractSecureQRInfo,
+  createSecureQRData,
+  // ✅ LEGACY: Keep for backward compatibility
   verifyQRCodeData,
-  generateQRCodeImage
+  generateQRCodeData
 } = require('../utils/qrCodeUtils')
 
 const {
@@ -63,137 +67,6 @@ function ticketDocumentToGrpcTicket (ticketDoc) {
       : null
   }
 }
-
-// async function InitiatePurchase (call, callback) {
-//   const {
-//     ticket_type_id,
-//     buyer_address,
-//     quantity = 1,
-//     selected_seats
-//   } = call.request
-
-//   try {
-//     // ✅ VALIDATE inputs (giữ nguyên validation logic)
-//     if (!mongoose.Types.ObjectId.isValid(ticket_type_id)) {
-//       return callback({
-//         code: grpc.status.INVALID_ARGUMENT,
-//         message: 'Invalid ticket type ID format.'
-//       })
-//     }
-
-//     const ticketType = await TicketType.findById(ticket_type_id)
-//     if (!ticketType) {
-//       return callback({
-//         code: grpc.status.NOT_FOUND,
-//         message: 'Ticket type not found.'
-//       })
-//     }
-
-//     // ✅ CHECK availability (real-time từ Ticket collection)
-//     const soldTicketsCount = await Ticket.countDocuments({
-//       ticketTypeId: ticket_type_id,
-//       status: { $in: ['PAID', 'MINTING', 'MINTED'] }
-//     })
-
-//     const availableQuantity = ticketType.totalQuantity - soldTicketsCount
-
-//     if (availableQuantity < quantity) {
-//       return callback({
-//         code: grpc.status.FAILED_PRECONDITION,
-//         message: `Not enough tickets available. Only ${availableQuantity} left.`
-//       })
-//     }
-
-//     // ✅ GENERATE unique order ID
-//     const ticketOrderId = `${Date.now()}-${Math.random()
-//       .toString(36)
-//       .substr(2, 9)}`
-
-//     // ✅ GET payment details từ blockchain service
-//     const paymentDetails = await new Promise((resolve, reject) => {
-//       blockchainServiceClient.GetTicketPaymentDetails(
-//         {
-//           blockchain_event_id: ticketType.blockchainEventId,
-//           price_wei_from_ticket_type: ticketType.priceWei
-//         },
-//         (err, res) => {
-//           if (err) reject(err)
-//           else resolve(res)
-//         }
-//       )
-//     })
-
-//     // ✅ CREATE PENDING tickets trực tiếp (không cần Purchase)
-//     const ticketsToCreate = []
-
-//     for (let i = 0; i < quantity; i++) {
-//       const ticketData = {
-//         eventId: ticketType.eventId,
-//         ticketTypeId: ticket_type_id,
-//         ownerAddress: buyer_address.toLowerCase(),
-//         sessionId: ticketType.sessionId,
-//         status: TICKET_STATUS_ENUM[0], // PENDING_PAYMENT
-//         // ✅ ADD: Store order info trong metadata
-//         metadata: {
-//           ticketOrderId,
-//           orderIndex: i,
-//           totalQuantity: quantity
-//         }
-//       }
-
-//       // ✅ ADD seat info if provided
-//       if (selected_seats && selected_seats[i]) {
-//         const seatKey = selected_seats[i]
-//         const [section, row, seat] = seatKey.split('-')
-//         ticketData.seatInfo = {
-//           seatKey,
-//           section,
-//           row,
-//           seat
-//         }
-//       }
-
-//       ticketsToCreate.push(ticketData)
-//     }
-
-//     // ✅ SAVE pending tickets
-//     const savedTickets = await Ticket.insertMany(ticketsToCreate)
-
-//     // ✅ LOG: Initial purchase transaction (INITIATED)
-//     await TransactionLogger.logTicketPurchase({
-//       transactionHash: '', // Chưa có transaction hash
-//       eventId: ticketType.eventId,
-//       organizerId: null, // Sẽ được fill sau
-//       userId: null,
-//       ticketTypeId: ticket_type_id,
-//       fromAddress: buyer_address,
-//       toAddress: paymentDetails.payment_contract_address,
-//       amountWei: (parseFloat(ticketType.priceWei) * quantity).toString(),
-//       platformFeeWei: '0', // Sẽ được tính từ contract
-//       organizerAmountWei: '0', // Sẽ được tính từ contract
-//       feePercentAtTime: 0, // Sẽ được lấy từ contract
-//       purchaseId: ticketOrderId, // ✅ CHANGE: Dùng ticket order ID
-//       ticketIds: savedTickets.map(t => t.id),
-//       quantity
-//     })
-
-//     callback(null, {
-//       ticket_order_id: ticketOrderId,
-//       payment_contract_address: paymentDetails.payment_contract_address,
-//       price_to_pay_wei: (parseFloat(ticketType.priceWei) * quantity).toString(),
-//       blockchain_event_id: ticketType.blockchainEventId,
-//       blockchain_ticket_type_id: ticketType.blockchainTicketTypeId,
-//       session_id_for_contract: ticketType.contractSessionId,
-//       purchase_id: ticketOrderId // ✅ DEPRECATED: Để backward compatibility
-//     })
-//   } catch (error) {
-//     console.error('❌ InitiatePurchase error:', error)
-//     callback({
-//       code: grpc.status.INTERNAL,
-//       message: error.message || 'Failed to initiate purchase'
-//     })
-//   }
-// }
 
 async function InitiatePurchase (call, callback) {
   const {
@@ -681,21 +554,323 @@ async function PrepareMetadata (call, callback) {
   }
 }
 
-async function GenerateQRCode (call, callback) {
-  const { ticket_id } = call.request
+// async function GenerateQRCode (call, callback) {
+//   const { ticket_id } = call.request
 
-  console.log(`TicketService: GenerateQRCode called for ticket: ${ticket_id}`)
+//   console.log(`TicketService: GenerateQRCode called for ticket: ${ticket_id}`)
+
+//   try {
+//     if (!mongoose.Types.ObjectId.isValid(ticket_id)) {
+//       return callback({
+//         code: grpc.status.INVALID_ARGUMENT,
+//         message: 'Invalid ticket ID format.'
+//       })
+//     }
+
+//     // Tìm ticket
+//     const ticket = await Ticket.findById(ticket_id)
+//     if (!ticket) {
+//       return callback({
+//         code: grpc.status.NOT_FOUND,
+//         message: 'Ticket not found.'
+//       })
+//     }
+
+//     // ✅ FIX: Allow QR generation for MINTED tickets
+//     if (ticket.status !== TICKET_STATUS_ENUM[4]) {
+//       // MINTED
+//       return callback({
+//         code: grpc.status.FAILED_PRECONDITION,
+//         message: `Cannot generate QR code for ticket with status: ${ticket.status}`
+//       })
+//     }
+
+//     // ✅ FIX: Get event and session info to set proper expiry time
+//     let eventData = null
+//     let sessionEndTime = null
+
+//     try {
+//       const eventResponse = await new Promise((resolve, reject) => {
+//         eventServiceClient.GetEvent(
+//           { event_id: ticket.eventId },
+//           (err, response) => {
+//             if (err) reject(err)
+//             else resolve(response)
+//           }
+//         )
+//       })
+
+//       eventData = eventResponse.event
+
+//       // Find the specific session for this ticket
+//       if (eventData && eventData.sessions) {
+//         const ticketSession = eventData.sessions.find(
+//           s => s.id === ticket.sessionId
+//         )
+//         if (ticketSession) {
+//           sessionEndTime = new Date(ticketSession.end_time * 1000)
+//           console.log(
+//             `✅ Found session end time: ${sessionEndTime} for ticket ${ticket_id}`
+//           )
+//         } else {
+//           console.warn(
+//             `⚠️ Session not found for ticket ${ticket_id}, using first session`
+//           )
+//           sessionEndTime = new Date(eventData.sessions[0].end_time * 1000)
+//         }
+//       }
+//     } catch (eventError) {
+//       console.warn('Could not fetch event data for QR expiry:', eventError)
+//       sessionEndTime = new Date(Date.now() + 24 * 60 * 60 * 1000)
+//     }
+
+//     // ✅ FIX: Generate QR code if not exists, or regenerate if requested
+//     let needsUpdate = false
+
+//     if (!ticket.qrCodeData || !ticket.qrCodeSecret) {
+//       const qrData = generateQRCodeData({
+//         ticketId: ticket.id,
+//         eventId: ticket.eventId,
+//         ownerAddress: ticket.ownerAddress
+//       })
+
+//       ticket.qrCodeData = qrData.qrCodeData
+//       ticket.qrCodeSecret = qrData.qrCodeSecret
+//       needsUpdate = true
+//       console.log(`✅ Generated new QR data for ticket ${ticket_id}`)
+//     }
+
+//     // ✅ FIX: Set expiry time based on session end time
+//     if (!ticket.expiryTime || sessionEndTime) {
+//       ticket.expiryTime =
+//         sessionEndTime || new Date(Date.now() + 24 * 60 * 60 * 1000)
+//       needsUpdate = true
+//       console.log(`✅ Set ticket expiry time to: ${ticket.expiryTime}`)
+//     }
+
+//     // Save updates if needed
+//     if (needsUpdate) {
+//       await ticket.save()
+//       console.log(`✅ Updated ticket ${ticket_id} with QR code and expiry time`)
+//     }
+
+//     // ✅ FIX: Generate QR code image from the JSON data
+//     console.log(
+//       `🔍 Generating QR image for data: ${ticket.qrCodeData.substring(
+//         0,
+//         50
+//       )}...`
+//     )
+
+//     const qrCodeImageDataURL = await generateQRCodeImage(ticket.qrCodeData)
+
+//     // ✅ Extract base64 data without the data:image/png;base64, prefix
+//     const base64ImageData = qrCodeImageDataURL.replace(
+//       'data:image/png;base64,',
+//       ''
+//     )
+
+//     console.log(
+//       `✅ Generated QR image, base64 length: ${base64ImageData.length}`
+//     )
+
+//     callback(null, {
+//       success: true,
+//       message: 'QR code generated successfully',
+//       qr_code_data: ticket.qrCodeData, // JSON data for verification
+//       qr_code_image_base64: base64ImageData // Pure base64 image data
+//     })
+//   } catch (error) {
+//     console.error('TicketService: GenerateQRCode error:', error)
+//     callback({
+//       code: grpc.status.INTERNAL,
+//       message: error.message || 'Failed to generate QR code'
+//     })
+//   }
+// }
+
+// async function CheckIn (call, callback) {
+//   const { qr_code_data, location, scanner_id } = call.request
+
+//   try {
+//     // Parse QR code data
+//     let qrData
+//     try {
+//       qrData = JSON.parse(qr_code_data)
+//     } catch (error) {
+//       return callback({
+//         code: grpc.status.INVALID_ARGUMENT,
+//         message: 'Invalid QR code format'
+//       })
+//     }
+
+//     // Tìm ticket bằng QR code data
+//     const ticket = await Ticket.findOne({ qrCodeData: qr_code_data })
+//     if (!ticket) {
+//       return callback({
+//         code: grpc.status.NOT_FOUND,
+//         message: 'Ticket not found'
+//       })
+//     }
+
+//     // Verify QR code signature
+//     const verification = verifyQRCodeData(qr_code_data, ticket.qrCodeSecret)
+//     if (!verification.valid) {
+//       return callback({
+//         code: grpc.status.INVALID_ARGUMENT,
+//         message: `Invalid QR code: ${verification.reason}`
+//       })
+//     }
+
+//     // ✅ NEW: Verify blockchain ownership
+//     if (ticket.tokenId && ticket.tokenId !== '0') {
+//       console.log(
+//         `🔍 Verifying blockchain ownership for token ${ticket.tokenId}`
+//       )
+
+//       try {
+//         const ownershipResponse = await new Promise((resolve, reject) => {
+//           blockchainServiceClient.VerifyTokenOwnership(
+//             {
+//               token_id: ticket.tokenId,
+//               expected_owner: ticket.ownerAddress
+//             },
+//             (err, res) => {
+//               if (err) reject(err)
+//               else resolve(res)
+//             }
+//           )
+//         })
+
+//         if (!ownershipResponse.is_valid_owner) {
+//           console.error(`❌ Ownership verification failed:`, {
+//             tokenId: ticket.tokenId,
+//             expectedOwner: ticket.ownerAddress,
+//             actualOwner: ownershipResponse.actual_owner,
+//             reason: ownershipResponse.reason
+//           })
+
+//           return callback({
+//             code: grpc.status.FAILED_PRECONDITION,
+//             message: `Ownership verification failed: ${
+//               ownershipResponse.reason || 'Token owner mismatch'
+//             }`
+//           })
+//         }
+
+//         console.log(
+//           `✅ Blockchain ownership verified for token ${ticket.tokenId}`
+//         )
+//       } catch (blockchainError) {
+//         console.error('❌ Blockchain ownership check failed:', blockchainError)
+//         return callback({
+//           code: grpc.status.INTERNAL,
+//           message: 'Failed to verify token ownership on blockchain'
+//         })
+//       }
+//     } else {
+//       console.warn(
+//         `⚠️ Ticket ${ticket.id} has no tokenId, skipping blockchain verification`
+//       )
+//     }
+
+//     // Rest of existing check-in logic...
+//     if (ticket.status !== TICKET_STATUS_ENUM[4]) {
+//       return callback({
+//         code: grpc.status.FAILED_PRECONDITION,
+//         message: `Cannot check-in ticket with status: ${ticket.status}`
+//       })
+//     }
+
+//     if (ticket.checkInStatus === 'CHECKED_IN') {
+//       return callback({
+//         code: grpc.status.ALREADY_EXISTS,
+//         message: `Ticket already checked in`
+//       })
+//     }
+
+//     // Perform check-in
+//     ticket.checkInStatus = 'CHECKED_IN'
+//     ticket.checkInTime = new Date()
+//     ticket.checkInLocation = location || 'Unknown'
+//     await ticket.save()
+
+//     callback(null, {
+//       success: true,
+//       message: 'Check-in successful with blockchain verification',
+//       ticket: ticketDocumentToGrpcTicket(ticket)
+//     })
+//   } catch (error) {
+//     console.error('CheckIn error:', error)
+//     callback({
+//       code: grpc.status.INTERNAL,
+//       message: error.message || 'Check-in failed'
+//     })
+//   }
+// }
+
+async function GenerateQRCode (call, callback) {
+  // Log the raw request for debugging
+  console.log('🔍 Raw gRPC call object:', {
+    requestKeys: Object.keys(call.request),
+    fullRequest: JSON.stringify(call.request, null, 2)
+  })
 
   try {
-    if (!mongoose.Types.ObjectId.isValid(ticket_id)) {
+    // Extract data from the flat request structure provided by Kong
+    const {
+      ticket_id: urlTicketId, // ticket_id from the URL path
+      address,
+      message,
+      signature,
+      ticket_id_data: bodyTicketId, // ticket_id from the request body
+      event_id_data: eventId,
+      timestamp,
+      nonce,
+      qr_image_base64
+    } = call.request
+
+    // --- Start of Validation ---
+    if (!urlTicketId || !mongoose.Types.ObjectId.isValid(urlTicketId)) {
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
-        message: 'Invalid ticket ID format.'
+        message: 'Invalid ticket ID format in URL.'
       })
     }
 
-    // Tìm ticket
-    const ticket = await Ticket.findById(ticket_id)
+    // Check for required secure data fields
+    const requiredFields = {
+      address,
+      message,
+      signature,
+      bodyTicketId,
+      eventId,
+      timestamp
+    }
+    for (const field in requiredFields) {
+      if (!requiredFields[field]) {
+        console.error(`❌ Missing required field: ${field}`)
+        return callback({
+          code: grpc.status.INVALID_ARGUMENT,
+          message: `Missing required field for secure QR generation: ${field}`
+        })
+      }
+    }
+
+    // Verify that the ticket ID from the URL matches the one in the signed message body
+    if (urlTicketId !== bodyTicketId) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: `Ticket ID mismatch: URL (${urlTicketId}) vs Body (${bodyTicketId}).`
+      })
+    }
+
+    // --- End of Validation ---
+
+    console.log('✅ All required fields for secure QR are present.')
+
+    // Find the ticket in the database
+    const ticket = await Ticket.findById(urlTicketId)
     if (!ticket) {
       return callback({
         code: grpc.status.NOT_FOUND,
@@ -703,95 +878,44 @@ async function GenerateQRCode (call, callback) {
       })
     }
 
-    // ✅ FIX: Allow QR generation for MINTED tickets
-    if (ticket.status !== TICKET_STATUS_ENUM[4]) {
-      // MINTED
+    // Check ticket status
+    if (ticket.status !== 'MINTED') {
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
         message: `Cannot generate QR code for ticket with status: ${ticket.status}`
       })
     }
 
-    // ✅ FIX: Get event and session info to set proper expiry time
-    let eventData = null
-    let sessionEndTime = null
-
-    try {
-      const eventResponse = await new Promise((resolve, reject) => {
-        eventServiceClient.GetEvent(
-          { event_id: ticket.eventId },
-          (err, response) => {
-            if (err) reject(err)
-            else resolve(response)
-          }
-        )
-      })
-
-      eventData = eventResponse.event
-
-      // Find the specific session for this ticket
-      if (eventData && eventData.sessions) {
-        const ticketSession = eventData.sessions.find(
-          s => s.id === ticket.sessionId
-        )
-        if (ticketSession) {
-          sessionEndTime = new Date(ticketSession.end_time * 1000)
-          console.log(
-            `✅ Found session end time: ${sessionEndTime} for ticket ${ticket_id}`
-          )
-        } else {
-          console.warn(
-            `⚠️ Session not found for ticket ${ticket_id}, using first session`
-          )
-          sessionEndTime = new Date(eventData.sessions[0].end_time * 1000)
-        }
-      }
-    } catch (eventError) {
-      console.warn('Could not fetch event data for QR expiry:', eventError)
-      sessionEndTime = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    // Construct the secure QR data object for verification and image generation
+    const secureQrDataObject = {
+      type: 'SECURE_CHECKIN_V1', // Standardize the type
+      address,
+      message,
+      signature,
+      ticketId: bodyTicketId,
+      eventId,
+      timestamp,
+      nonce
     }
 
-    // ✅ FIX: Generate QR code if not exists, or regenerate if requested
-    let needsUpdate = false
-
-    if (!ticket.qrCodeData || !ticket.qrCodeSecret) {
-      const qrData = generateQRCodeData({
-        ticketId: ticket.id,
-        eventId: ticket.eventId,
-        ownerAddress: ticket.ownerAddress
-      })
-
-      ticket.qrCodeData = qrData.qrCodeData
-      ticket.qrCodeSecret = qrData.qrCodeSecret
-      needsUpdate = true
-      console.log(`✅ Generated new QR data for ticket ${ticket_id}`)
-    }
-
-    // ✅ FIX: Set expiry time based on session end time
-    if (!ticket.expiryTime || sessionEndTime) {
-      ticket.expiryTime =
-        sessionEndTime || new Date(Date.now() + 24 * 60 * 60 * 1000)
-      needsUpdate = true
-      console.log(`✅ Set ticket expiry time to: ${ticket.expiryTime}`)
-    }
-
-    // Save updates if needed
-    if (needsUpdate) {
-      await ticket.save()
-      console.log(`✅ Updated ticket ${ticket_id} with QR code and expiry time`)
-    }
-
-    // ✅ FIX: Generate QR code image from the JSON data
-    console.log(
-      `🔍 Generating QR image for data: ${ticket.qrCodeData.substring(
-        0,
-        50
-      )}...`
+    // Verify the digital signature
+    const verificationResult = verifySecureQRData(
+      JSON.stringify(secureQrDataObject)
     )
+    if (!verificationResult.valid) {
+      console.error('❌ Secure QR verification failed:', verificationResult)
+      return callback({
+        code: grpc.status.UNAUTHENTICATED,
+        message: `Signature verification failed: ${verificationResult.reason}`
+      })
+    }
 
-    const qrCodeImageDataURL = await generateQRCodeImage(ticket.qrCodeData)
+    console.log('✅ Digital signature verified successfully.')
 
-    // ✅ Extract base64 data without the data:image/png;base64, prefix
+    // Generate the QR code image from the verified data object
+    const qrCodeImageDataURL = await generateQRCodeImage(
+      JSON.stringify(secureQrDataObject)
+    )
     const base64ImageData = qrCodeImageDataURL.replace(
       'data:image/png;base64,',
       ''
@@ -801,137 +925,113 @@ async function GenerateQRCode (call, callback) {
       `✅ Generated QR image, base64 length: ${base64ImageData.length}`
     )
 
+    // Update the ticket with the new QR data for logging/auditing if needed
+    ticket.qrCodeData = JSON.stringify(secureQrDataObject)
+    await ticket.save()
+
+    // Return the successful response
     callback(null, {
       success: true,
-      message: 'QR code generated successfully',
-      qr_code_data: ticket.qrCodeData, // JSON data for verification
-      qr_code_image_base64: base64ImageData // Pure base64 image data
+      message: 'Secure QR code generated and verified successfully',
+      qr_code_data: ticket.qrCodeData,
+      qr_code_image_base64: base64ImageData,
+      qr_type: 'SECURE_SIGNATURE',
+      generated_at: Math.floor(Date.now() / 1000),
+      expires_at: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000)
     })
   } catch (error) {
-    console.error('TicketService: GenerateQRCode error:', error)
+    console.error('TicketService: GenerateQRCode internal error:', error)
     callback({
       code: grpc.status.INTERNAL,
-      message: error.message || 'Failed to generate QR code'
+      message:
+        error.message || 'Failed to generate QR code due to an internal error.'
     })
   }
 }
 
+// ✅ ENHANCED: CheckIn với better error handling
 async function CheckIn (call, callback) {
   const { qr_code_data, location, scanner_id } = call.request
 
   try {
-    // Parse QR code data
-    let qrData
-    try {
-      qrData = JSON.parse(qr_code_data)
-    } catch (error) {
-      return callback({
-        code: grpc.status.INVALID_ARGUMENT,
-        message: 'Invalid QR code format'
-      })
-    }
+    console.log('🔍 Starting secure check-in process...')
 
-    // Tìm ticket bằng QR code data
-    const ticket = await Ticket.findOne({ qrCodeData: qr_code_data })
-    if (!ticket) {
-      return callback({
-        code: grpc.status.NOT_FOUND,
-        message: 'Ticket not found'
-      })
-    }
+    // ✅ USE: verifySecureQRData from utils
+    const verification = verifySecureQRData(qr_code_data)
 
-    // Verify QR code signature
-    const verification = verifyQRCodeData(qr_code_data, ticket.qrCodeSecret)
     if (!verification.valid) {
       return callback({
         code: grpc.status.INVALID_ARGUMENT,
-        message: `Invalid QR code: ${verification.reason}`
+        message: `QR verification failed: ${verification.reason}`
       })
     }
 
-    // ✅ NEW: Verify blockchain ownership
-    if (ticket.tokenId && ticket.tokenId !== '0') {
-      console.log(
-        `🔍 Verifying blockchain ownership for token ${ticket.tokenId}`
-      )
+    const qrData = verification.data
+    console.log('✅ QR data verified using utils function')
 
-      try {
-        const ownershipResponse = await new Promise((resolve, reject) => {
-          blockchainServiceClient.VerifyTokenOwnership(
-            {
-              token_id: ticket.tokenId,
-              expected_owner: ticket.ownerAddress
-            },
-            (err, res) => {
-              if (err) reject(err)
-              else resolve(res)
-            }
-          )
-        })
-
-        if (!ownershipResponse.is_valid_owner) {
-          console.error(`❌ Ownership verification failed:`, {
-            tokenId: ticket.tokenId,
-            expectedOwner: ticket.ownerAddress,
-            actualOwner: ownershipResponse.actual_owner,
-            reason: ownershipResponse.reason
-          })
-
-          return callback({
-            code: grpc.status.FAILED_PRECONDITION,
-            message: `Ownership verification failed: ${
-              ownershipResponse.reason || 'Token owner mismatch'
-            }`
-          })
-        }
-
-        console.log(
-          `✅ Blockchain ownership verified for token ${ticket.tokenId}`
-        )
-      } catch (blockchainError) {
-        console.error('❌ Blockchain ownership check failed:', blockchainError)
-        return callback({
-          code: grpc.status.INTERNAL,
-          message: 'Failed to verify token ownership on blockchain'
-        })
-      }
-    } else {
-      console.warn(
-        `⚠️ Ticket ${ticket.id} has no tokenId, skipping blockchain verification`
-      )
+    // ✅ FIND: Ticket in database
+    const ticket = await Ticket.findById(qrData.ticketId)
+    if (!ticket) {
+      return callback({
+        code: grpc.status.NOT_FOUND,
+        message: 'Ticket not found in database'
+      })
     }
 
-    // Rest of existing check-in logic...
+    // ✅ VERIFY: Ticket ownership
+    if (ticket.ownerAddress.toLowerCase() !== qrData.address.toLowerCase()) {
+      return callback({
+        code: grpc.status.FORBIDDEN,
+        message: 'QR signer is not the ticket owner'
+      })
+    }
+
+    // ✅ VERIFY: Event match
+    if (ticket.eventId !== qrData.eventId) {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Event ID mismatch between ticket and QR'
+      })
+    }
+
+    // ✅ CHECK: Ticket status
     if (ticket.status !== TICKET_STATUS_ENUM[4]) {
       return callback({
         code: grpc.status.FAILED_PRECONDITION,
-        message: `Cannot check-in ticket with status: ${ticket.status}`
+        message: `Ticket status is ${ticket.status}, expected MINTED`
       })
     }
 
     if (ticket.checkInStatus === 'CHECKED_IN') {
       return callback({
         code: grpc.status.ALREADY_EXISTS,
-        message: `Ticket already checked in`
+        message: `Ticket already checked in at ${ticket.checkInTime} (${ticket.checkInLocation})`
       })
     }
 
-    // Perform check-in
+    // ✅ PERFORM: Check-in
     ticket.checkInStatus = 'CHECKED_IN'
     ticket.checkInTime = new Date()
     ticket.checkInLocation = location || 'Unknown'
+    ticket.metadata.checkInMethod = 'SECURE_SIGNATURE'
+    ticket.metadata.checkInSignature = qrData.signature
+    ticket.metadata.checkInScannerId = scanner_id
+
     await ticket.save()
+
+    console.log('✅ Secure check-in completed successfully')
 
     callback(null, {
       success: true,
-      message: 'Check-in successful with blockchain verification',
-      ticket: ticketDocumentToGrpcTicket(ticket)
+      message: 'Secure check-in successful with digital signature verification',
+      ticket: ticketDocumentToGrpcTicket(ticket),
+      verification_method: 'DIGITAL_SIGNATURE'
     })
   } catch (error) {
-    console.error('CheckIn error:', error)
+    console.error('❌ Secure check-in error:', error)
     callback({
       code: grpc.status.INTERNAL,
-      message: error.message || 'Check-in failed'
+      message: error.message || 'Secure check-in failed'
     })
   }
 }
@@ -1260,20 +1360,28 @@ async function GetMyTicketsWithDetails (call, callback) {
         const event = eventsMap[ticket.eventId]
         const ticketType = ticketTypesMap[ticket.ticketTypeId]
 
-        // ✅ FIX: Handle QR code properly
+        // ✅ FIXED: Handle QR code data properly - NO WARNING for missing QR
         let qrCodeData = null
         if (ticket.qrCodeData) {
-          // ✅ Don't generate image here, just return the JSON data
-          // Frontend will handle the image generation
-          qrCodeData = ticket.qrCodeData
-          console.log(
-            `🔍 Ticket ${ticket.id} has QR data: ${qrCodeData.substring(
-              0,
-              50
-            )}...`
-          )
+          try {
+            // ✅ Parse to validate it's secure QR format
+            const parsed = JSON.parse(ticket.qrCodeData)
+            if (parsed.type === 'SECURE_CHECKIN_V1') {
+              qrCodeData = ticket.qrCodeData
+              console.log(`✅ Ticket ${ticket.id} has secure QR data`)
+            } else {
+              // Legacy QR - treat as no QR for now
+              console.log(`📜 Ticket ${ticket.id} has legacy QR data`)
+              qrCodeData = null
+            }
+          } catch (parseError) {
+            // Invalid QR format
+            console.log(`⚠️ Ticket ${ticket.id} has invalid QR format`)
+            qrCodeData = null
+          }
         } else {
-          console.log(`⚠️ Ticket ${ticket.id} has no QR data`)
+          // ✅ NO WARNING: This is expected for new tickets without QR
+          console.log(`📋 Ticket ${ticket.id} ready for QR generation`)
         }
 
         return {
@@ -1293,7 +1401,8 @@ async function GetMyTicketsWithDetails (call, callback) {
             ? Math.floor(ticket.expiryTime.getTime() / 1000)
             : 0,
           seat_info: ticket.seatInfo || null,
-          qr_code_data: qrCodeData, // ✅ This is the JSON string, not base64 image
+          // ✅ IMPORTANT: Return QR data only if it exists (no empty string)
+          qr_code_data: qrCodeData || '', // Frontend will check if this is empty
           event: event || null,
           ticket_type: ticketType
             ? {
@@ -1305,6 +1414,17 @@ async function GetMyTicketsWithDetails (call, callback) {
         }
       })
     )
+
+    // ✅ LOG summary without flooding console
+    const totalTickets = detailedTickets.length
+    const ticketsWithQR = detailedTickets.filter(t => t.qr_code_data).length
+    const ticketsWithoutQR = totalTickets - ticketsWithQR
+
+    console.log(`✅ Tickets summary for ${owner_address}:`, {
+      total: totalTickets,
+      withQR: ticketsWithQR,
+      readyForQR: ticketsWithoutQR
+    })
 
     callback(null, { tickets: detailedTickets })
   } catch (error) {
@@ -1577,21 +1697,21 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
           ticket.tokenUriCid = fullTokenUri
 
           // ✅ AUTO-GENERATE QR CODE after successful mint
-          try {
-            const qrData = generateQRCodeData({
-              ticketId: ticket.id,
-              eventId: ticket.eventId,
-              ownerAddress: ticket.ownerAddress
-            })
-            ticket.qrCodeData = qrData.qrCodeData
-            ticket.qrCodeSecret = qrData.secret
-            console.log(`✅ QR code generated for ticket ${ticket.id}`)
-          } catch (qrError) {
-            console.warn(
-              `⚠️ QR code generation failed for ticket ${ticket.id}:`,
-              qrError
-            )
-          }
+          // try {
+          //   const qrData = generateQRCodeData({
+          //     ticketId: ticket.id,
+          //     eventId: ticket.eventId,
+          //     ownerAddress: ticket.ownerAddress
+          //   })
+          //   ticket.qrCodeData = qrData.qrCodeData
+          //   ticket.qrCodeSecret = qrData.secret
+          //   console.log(`✅ QR code generated for ticket ${ticket.id}`)
+          // } catch (qrError) {
+          //   console.warn(
+          //     `⚠️ QR code generation failed for ticket ${ticket.id}:`,
+          //     qrError
+          //   )
+          // }
 
           await ticket.save()
 

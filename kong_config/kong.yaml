@@ -60,7 +60,7 @@ services:
       - name: grpc-gateway
         config:
           proto: /etc/kong/protos/ticket.proto
-  
+
   - name: seatmap-grpc-service
     host: seatmap-service.service.consul
     port: 50057
