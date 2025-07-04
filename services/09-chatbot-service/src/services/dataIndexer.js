@@ -235,7 +235,7 @@ async function indexUsers (forceReindex = false) {
 }
 
 async function schedulePeriodicIndexing () {
-  console.log('⏰ Setting up intelligent periodic indexing...')
+  console.log('⏰ Setting up intelligent periodic indexing evry 30s')
 
   // Check every 2 hours instead of reindexing every 6 hours
   setInterval(async () => {
@@ -250,7 +250,7 @@ async function schedulePeriodicIndexing () {
     } catch (error) {
       console.error('❌ Periodic indexing failed:', error)
     }
-  }, 2 * 60 * 60 * 1000) // Check every 2 hours
+  }, 30 * 1000) // Check every 30s
 }
 
 module.exports = {

@@ -21,6 +21,7 @@
     "express": "^5.1.0",
     "grpc-health-check": "^2.0.2",
     "mongoose": "^8.16.0",
+    "node-cron": "^4.2.0",
     "uuid": "^11.1.0"
   }
 }
