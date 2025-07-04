@@ -131,6 +131,32 @@ async function indexEvents (forceReindex = false) {
   }
 }
 
+// ✅ THÊM: Cache events để tránh gọi API nhiều lần
+let eventsCache = null
+let eventsCacheTime = null
+const CACHE_DURATION = 5 * 60 * 1000 // 5 phút
+
+async function getEventsWithCache () {
+  const now = Date.now()
+
+  if (
+    eventsCache &&
+    eventsCacheTime &&
+    now - eventsCacheTime < CACHE_DURATION
+  ) {
+    console.log('Using cached events data')
+    return eventsCache
+  }
+
+  console.log('Fetching fresh events data...')
+  const events = await eventClient.getAllEvents()
+
+  eventsCache = events
+  eventsCacheTime = now
+
+  return events
+}
+
 async function indexTickets (forceReindex = false) {
   try {
     console.log('Fetching tickets from ticket service...')
@@ -143,7 +169,23 @@ async function indexTickets (forceReindex = false) {
 
     console.log(`Processing ${tickets.length} tickets...`)
 
-    // ✅ FIX: Use correct ticket fields from proto
+    // ✅ THÊM: Fetch events để enrichment
+    console.log('Fetching events for ticket enrichment...')
+    const events = await getEventsWithCache()
+
+    // ✅ THÊM: Tạo event lookup map
+    const eventMap = new Map()
+    if (events && events.length > 0) {
+      events.forEach(event => {
+        eventMap.set(event.id, {
+          name: event.name,
+          location: event.location,
+          status: event.status
+        })
+      })
+    }
+
+    // ✅ CẬP NHẬT: Enrich ticket texts với event name
     const ticketTexts = tickets.map(ticket => {
       const eventId = ticket.event_id || 'unknown'
       const status = ticket.status || 'unknown'
@@ -151,30 +193,43 @@ async function indexTickets (forceReindex = false) {
       const ownerAddress = ticket.owner_address || 'unknown'
       const checkInStatus = ticket.check_in_status || 'NOT_CHECKED_IN'
 
-      return `vé ${ticketTypeId} sự kiện ${eventId} trạng thái ${status} chủ sở hữu ${ownerAddress} check-in ${checkInStatus}`
+      // ✅ THÊM: Lấy event name từ cache
+      const eventInfo = eventMap.get(eventId)
+      const eventName = eventInfo?.name || `sự kiện ${eventId}`
+      const eventLocation = eventInfo?.location || ''
+
+      return `vé ${ticketTypeId} cho ${eventName} tại ${eventLocation} trạng thái ${status} chủ sở hữu ${ownerAddress} check-in ${checkInStatus}`
     })
 
     // Generate embeddings
     const embeddings = await generateBatchEmbeddings(ticketTexts)
 
-    // ✅ FIX: Use correct metadata fields
-    const vectors = tickets.map((ticket, index) => ({
-      id: `ticket_${ticket.id}`,
-      values: embeddings[index],
-      metadata: {
-        id: ticket.id,
-        type: 'ticket',
-        title: `Vé cho sự kiện ${ticket.event_id}`,
-        content: `Vé ID ${ticket.id} cho sự kiện ${ticket.event_id}. Trạng thái: ${ticket.status}. Chủ sở hữu: ${ticket.owner_address}. Check-in: ${ticket.check_in_status}`,
-        event_id: ticket.event_id,
-        ticket_type_id: ticket.ticket_type_id,
-        status: ticket.status,
-        owner_address: ticket.owner_address,
-        token_id: ticket.token_id || '',
-        check_in_status: ticket.check_in_status || 'NOT_CHECKED_IN',
-        session_id: ticket.session_id || ''
+    // ✅ CẬP NHẬT: Enrich metadata với event info
+    const vectors = tickets.map((ticket, index) => {
+      const eventInfo = eventMap.get(ticket.event_id)
+      const eventName = eventInfo?.name || `Event ${ticket.event_id}`
+
+      return {
+        id: `ticket_${ticket.id}`,
+        values: embeddings[index],
+        metadata: {
+          id: ticket.id,
+          type: 'ticket',
+          title: `Vé cho ${eventName}`,
+          content: `Vé ID ${ticket.id} cho ${eventName}. Trạng thái: ${ticket.status}. Chủ sở hữu: ${ticket.owner_address}. Check-in: ${ticket.check_in_status}`,
+          event_id: ticket.event_id,
+          event_name: eventName, // ✅ THÊM: Lưu event name
+          event_location: eventInfo?.location || '',
+          event_status: eventInfo?.status || '',
+          ticket_type_id: ticket.ticket_type_id,
+          status: ticket.status,
+          owner_address: ticket.owner_address,
+          token_id: ticket.token_id || '',
+          check_in_status: ticket.check_in_status || 'NOT_CHECKED_IN',
+          session_id: ticket.session_id || ''
+        }
       }
-    }))
+    })
 
     // Upsert to vector database
     await upsertVectors(vectors)

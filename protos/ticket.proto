@@ -209,6 +209,49 @@ service TicketService {
       body: "*"
     };
   }
+
+  rpc ExpireTicketsForEvent(ExpireTicketsForEventRequest) returns (ExpireTicketsForEventResponse);
+
+  rpc GetExpiredTicketsStats(GetExpiredTicketsStatsRequest) returns (GetExpiredTicketsStatsResponse);
+}
+
+// ✅ THÊM: New message types
+message ExpireTicketsForEventRequest {
+  string event_id = 1;
+}
+
+message ExpireTicketsForEventResponse {
+  bool success = 1;
+  int32 expired_count = 2;
+  string message = 3;
+  string event_id = 4;
+  string event_name = 5;
+}
+
+message GetExpiredTicketsStatsRequest {
+  string event_id = 1; // Optional - if empty, get stats for all events
+  bool include_details = 2;
+}
+
+message ExpiredTicketDetail {
+  string id = 1;
+  string token_id = 2;
+  string owner_address = 3;
+  string ticket_type_id = 4;
+  int64 expired_at = 5;
+}
+
+message ExpiredByEventStat {
+  string event_id = 1;
+  int32 count = 2;
+  int32 ticket_types_count = 3;
+}
+
+message GetExpiredTicketsStatsResponse {
+  int32 total_expired = 1;
+  int32 recent_expirations_24h = 2;
+  repeated ExpiredByEventStat expired_by_event = 3;
+  repeated ExpiredTicketDetail expired_tickets = 4; // Only included if include_details=true
 }
 
 // ✅ NEW: Transaction messages

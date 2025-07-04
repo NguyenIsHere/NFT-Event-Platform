@@ -8,11 +8,15 @@ if (!GEMINI_API_KEY) {
   process.exit(1)
 }
 
-async function generateResponse (userMessage, contextPrompt, queryType = 'SPECIFIC') {
+async function generateResponse (
+  userMessage,
+  contextPrompt,
+  queryType = 'SPECIFIC'
+) {
   try {
-    // ✅ CẬP NHẬT: Adaptive system prompt based on query type
+    // Adaptive system prompt based on query type
     let systemPrompt = `Bạn là một chatbot hỗ trợ cho NFT Event Platform. 
-    Bạn giúp người dùng tìm hiểu về các sự kiện, vé, và thông tin liên quan.`;
+    Bạn giúp người dùng tìm hiểu về các sự kiện, vé, và thông tin liên quan.`
 
     if (queryType === 'LISTING') {
       systemPrompt += `
@@ -24,26 +28,43 @@ async function generateResponse (userMessage, contextPrompt, queryType = 'SPECIF
       - Sử dụng format: "Có X sự kiện, Y vé. Ví dụ: A, B, C"
       - Trả lời ngắn gọn và trực tiếp
       - KHÔNG sử dụng định dạng Markdown
-      - KHÔNG viết dài dòng hay lặp lại thông tin`;
+      - KHÔNG viết dài dòng hay lặp lại thông tin
+      - LUÔN sử dụng TÊN SỰ KIỆN thay vì ID sự kiện
+      - Chuyển đổi trạng thái technical thành ngôn ngữ thân thiện (VD: CHECKED_IN -> đã check-in)
+      - Không bao gồm các id hay giá trị trực tiếp từ dữ liệu vào câu trả lời`
     } else {
       systemPrompt += `
       
       QUY TẮC TRẢ LỜI CHO CÂU HỎI CỤ THỂ:
       - Trả lời chi tiết và chính xác
       - Đi thẳng vào vấn đề
-      - Trả lời bằng tiếng Việt một cách NGẮN GỌN và TRỰC TIẾP
+      - Trả lời bằng tiếng Việt một cách thân thiện và không quá cụt lủn
       - KHÔNG sử dụng định dạng Markdown (*, **, #, -, etc.)
+      - LUÔN sử dụng TÊN SỰ KIỆN thay vì ID sự kiện
+      - Chuyển đổi trạng thái technical thành ngôn ngữ thân thiện:
+        * CHECKED_IN -> đã check-in
+        * NOT_CHECKED_IN -> chưa check-in
+        * PAID -> đã thanh toán
+        * PENDING -> đang xử lý
+        * ACTIVE -> đang hoạt động
+        * ENDED -> đã kết thúc
       - KHÔNG viết dài dòng hay lặp lại thông tin
       - Nếu không có dữ liệu, chỉ nói "Không tìm thấy" thay vì giải thích dài
       - Không sử dụng emoji hay ký tự đặc biệt
-      - KHÔNG sử dụng từ ngữ như "tôi nghĩ", "có thể", "có lẽ" - chỉ nói sự thật`;
+      - KHÔNG sử dụng từ ngữ như "tôi nghĩ", "có thể", "có lẽ" - chỉ nói sự thật`
     }
 
     systemPrompt += `
     
+    QUY TẮC ĐẶC BIỆT VỀ TÊN SỰ KIỆN:
+    - Khi nhắc đến vé hoặc check-in, LUÔN dùng tên sự kiện nếu có
+    - Nếu trong dữ liệu có cả event_id và event_name, ưu tiên event_name
+    - Ví dụ: "Bạn đã check-in tại sự kiện Rock Concert 2024" thay vì "Bạn đã check-in tại sự kiện event_123"
+    - Nếu không có tên sự kiện, hãy dùng mô tả thân thiện như "sự kiện này" hoặc "sự kiện đó"
+    
     ${contextPrompt}
     
-    Câu hỏi của người dùng: ${userMessage}`;
+    Câu hỏi của người dùng: ${userMessage}`
 
     const requestBody = {
       contents: [
@@ -56,10 +77,10 @@ async function generateResponse (userMessage, contextPrompt, queryType = 'SPECIF
         }
       ],
       generationConfig: {
-        temperature: 0.5,
+        temperature: 0.7,
         topP: 0.8,
         topK: 40,
-        maxOutputTokens: queryType === 'LISTING' ? 512 : 1024, // Ngắn hơn cho listing queries
+        maxOutputTokens: queryType === 'LISTING' ? 1024 : 2048, // Ngắn hơn cho listing queries
         candidateCount: 1,
         stopSequences: ['\n\n\n']
       }

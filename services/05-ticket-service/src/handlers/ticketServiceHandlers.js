@@ -1842,6 +1842,218 @@ async function ConfirmPaymentAndRequestMint (call, callback) {
   }
 }
 
+// ...existing code...
+
+// ✅ THÊM: Function to expire tickets for ended events
+async function ExpireTicketsForEvent (call, callback) {
+  const { event_id } = call.request
+  console.log(`🎫 ExpireTicketsForEvent called for event: ${event_id}`)
+
+  try {
+    // ✅ VALIDATE event_id
+    if (!event_id || event_id.trim() === '') {
+      return callback({
+        code: grpc.status.INVALID_ARGUMENT,
+        message: 'Event ID is required'
+      })
+    }
+
+    // ✅ Get event info first to check if it's actually ended
+    let eventInfo = null
+    try {
+      const eventResponse = await new Promise((resolve, reject) => {
+        eventServiceClient.GetEvent(
+          { event_id: event_id },
+          { deadline: new Date(Date.now() + 10000) },
+          (err, response) => {
+            if (err) {
+              reject(new Error(`Event not found: ${err.message}`))
+            } else {
+              resolve(response)
+            }
+          }
+        )
+      })
+      eventInfo = eventResponse.event
+    } catch (eventError) {
+      console.warn(
+        `⚠️ Could not verify event status for ${event_id}:`,
+        eventError.message
+      )
+      // Continue anyway - event might be ended
+    }
+
+    // ✅ Only expire if event is actually ended
+    if (eventInfo && eventInfo.status !== 'ENDED') {
+      console.log(
+        `ℹ️ Event "${eventInfo.name}" is not ended (status: ${eventInfo.status}), skipping ticket expiration`
+      )
+      return callback(null, {
+        success: true,
+        expired_count: 0,
+        message: 'Event is not ended, no tickets expired'
+      })
+    }
+
+    // ✅ Find tickets that should be expired
+    const ticketsToExpire = await Ticket.find({
+      eventId: event_id,
+      status: { $in: ['PAID', 'MINTING', 'MINTED'] }, // Only expire valid tickets
+      checkInStatus: { $in: ['NOT_CHECKED_IN'] } // Only expire tickets that haven't been checked in
+    })
+
+    if (ticketsToExpire.length === 0) {
+      console.log(`ℹ️ No tickets to expire for event ${event_id}`)
+      return callback(null, {
+        success: true,
+        expired_count: 0,
+        message: 'No tickets found to expire'
+      })
+    }
+
+    console.log(
+      `🎫 Found ${ticketsToExpire.length} tickets to expire for event ${event_id}`
+    )
+
+    // ✅ Update tickets to EXPIRED status
+    const updateResult = await Ticket.updateMany(
+      {
+        eventId: event_id,
+        status: { $in: ['PAID', 'MINTING', 'MINTED'] },
+        checkInStatus: { $in: ['NOT_CHECKED_IN'] }
+      },
+      {
+        $set: {
+          checkInStatus: 'EXPIRED',
+          expiryTime: new Date() // Set expiry time to now
+        }
+      }
+    )
+
+    const expiredCount = updateResult.modifiedCount || 0
+
+    if (expiredCount > 0) {
+      console.log(`✅ Expired ${expiredCount} tickets for event ${event_id}`)
+
+      // ✅ Log summary by ticket type
+      const expiredTicketsByType = await Ticket.aggregate([
+        {
+          $match: {
+            eventId: event_id,
+            checkInStatus: 'EXPIRED'
+          }
+        },
+        {
+          $group: {
+            _id: '$ticketTypeId',
+            count: { $sum: 1 },
+            ticketIds: { $push: '$_id' }
+          }
+        }
+      ])
+
+      if (expiredTicketsByType.length > 0) {
+        console.log(`📊 Expired tickets by type:`)
+        for (const typeGroup of expiredTicketsByType) {
+          console.log(`   - Type ${typeGroup._id}: ${typeGroup.count} tickets`)
+        }
+      }
+    } else {
+      console.log(
+        `ℹ️ No tickets were actually expired for event ${event_id} (already expired or checked in)`
+      )
+    }
+
+    callback(null, {
+      success: true,
+      expired_count: expiredCount,
+      message: `Successfully expired ${expiredCount} tickets for event ${event_id}`,
+      event_id: event_id,
+      event_name: eventInfo?.name || 'Unknown Event'
+    })
+  } catch (error) {
+    console.error(
+      `❌ ExpireTicketsForEvent error for event ${event_id}:`,
+      error
+    )
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to expire tickets for event'
+    })
+  }
+}
+
+// ✅ THÊM: Function to get expired tickets statistics
+async function GetExpiredTicketsStats (call, callback) {
+  const { event_id, include_details = false } = call.request
+  console.log(`📊 GetExpiredTicketsStats called for event: ${event_id}`)
+
+  try {
+    const query = { checkInStatus: 'EXPIRED' }
+    if (event_id) {
+      query.eventId = event_id
+    }
+
+    // ✅ Get basic stats
+    const totalExpired = await Ticket.countDocuments(query)
+
+    // ✅ Get stats by event
+    const expiredByEvent = await Ticket.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: '$eventId',
+          count: { $sum: 1 },
+          ticketTypes: { $addToSet: '$ticketTypeId' }
+        }
+      },
+      { $sort: { count: -1 } }
+    ])
+
+    // ✅ Get recent expirations (last 24 hours)
+    const recentExpirations = await Ticket.countDocuments({
+      ...query,
+      expiryTime: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+    })
+
+    const stats = {
+      total_expired: totalExpired,
+      recent_expirations_24h: recentExpirations,
+      expired_by_event: expiredByEvent.map(item => ({
+        event_id: item._id,
+        count: item.count,
+        ticket_types_count: item.ticketTypes.length
+      }))
+    }
+
+    // ✅ Include ticket details if requested
+    if (include_details && event_id) {
+      const expiredTickets = await Ticket.find(query)
+        .select('id tokenId ownerAddress expiryTime ticketTypeId')
+        .limit(100) // Limit to prevent large responses
+        .sort({ expiryTime: -1 })
+
+      stats.expired_tickets = expiredTickets.map(ticket => ({
+        id: ticket.id,
+        token_id: ticket.tokenId || '',
+        owner_address: ticket.ownerAddress,
+        ticket_type_id: ticket.ticketTypeId,
+        expired_at: ticket.expiryTime
+          ? Math.floor(ticket.expiryTime.getTime() / 1000)
+          : 0
+      }))
+    }
+
+    callback(null, stats)
+  } catch (error) {
+    console.error('❌ GetExpiredTicketsStats error:', error)
+    callback({
+      code: grpc.status.INTERNAL,
+      message: error.message || 'Failed to get expired tickets stats'
+    })
+  }
+}
+
 module.exports = {
   InitiatePurchase,
   ConfirmPaymentAndRequestMint,
@@ -1864,5 +2076,7 @@ module.exports = {
   LogPlatformWithdraw,
   GetAllTransactions,
   GetTransactionDetails,
-  SyncTicketTypeAvailability
+  SyncTicketTypeAvailability,
+  ExpireTicketsForEvent,
+  GetExpiredTicketsStats
 }

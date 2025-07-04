@@ -48,7 +48,7 @@ const TICKET_STATUS_ENUM = [
   'MINTING', // 2
   'MINT_FAILED', // 3
   'MINTED', // 4
-  'FAILED_MINT' // 5
+  'FAILED_MINT'
 ]
 
 const seatInfoSchema = new Schema(

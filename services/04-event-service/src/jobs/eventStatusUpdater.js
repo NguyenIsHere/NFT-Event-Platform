@@ -1,5 +1,6 @@
 const cron = require('node-cron')
 const { Event, EVENT_STATUS_ENUM } = require('../models/Event')
+const { ticketServiceClient } = require('../clients/ticketServiceClient')
 
 class EventStatusUpdater {
   constructor () {
@@ -7,8 +8,8 @@ class EventStatusUpdater {
   }
 
   start () {
-    // ✅ Chạy mỗi 5 phút để kiểm tra events cần update status
-    cron.schedule('*/5 * * * *', async () => {
+    // ✅ Chạy mỗi 1 phút để kiểm tra events cần update status
+    cron.schedule('*/1 * * * *', async () => {
       if (this.isRunning) {
         console.log('⏸️ EventStatusUpdater already running, skipping...')
         return
@@ -17,6 +18,8 @@ class EventStatusUpdater {
       try {
         this.isRunning = true
         await this.updateEndedEvents()
+        // Expire tickets sau khi update events
+        await this.expireTicketsForEndedEvents()
       } catch (error) {
         console.error('❌ EventStatusUpdater error:', error)
       } finally {
@@ -25,6 +28,9 @@ class EventStatusUpdater {
     })
 
     console.log('✅ EventStatusUpdater started - checking every 5 minutes')
+    console.log(
+      '🎫 EventStatusUpdater will also expire tickets for ended events'
+    )
   }
 
   async updateEndedEvents () {
@@ -101,10 +107,85 @@ class EventStatusUpdater {
     }
   }
 
+  // ✅ THÊM: Expire tickets for ended events
+  async expireTicketsForEndedEvents () {
+    console.log('🎫 Checking for tickets that should be expired...')
+
+    try {
+      // Find all ENDED events
+      const endedEvents = await Event.find({
+        status: EVENT_STATUS_ENUM[4] // ENDED
+      })
+
+      let totalExpiredTickets = 0
+
+      for (const event of endedEvents) {
+        try {
+          // ✅ Call ticket service to expire tickets for this event
+          const expireResult = await this.expireTicketsForEvent(event.id)
+
+          if (expireResult.success) {
+            totalExpiredTickets += expireResult.expired_count
+
+            if (expireResult.expired_count > 0) {
+              console.log(
+                `🎫 Expired ${expireResult.expired_count} tickets for event "${event.name}"`
+              )
+            }
+          }
+        } catch (expireError) {
+          console.error(
+            `❌ Error expiring tickets for event "${event.name}":`,
+            expireError.message
+          )
+          // Continue with other events
+        }
+      }
+
+      if (totalExpiredTickets > 0) {
+        console.log(`✅ Total expired tickets: ${totalExpiredTickets}`)
+      } else {
+        console.log('ℹ️ No tickets need to be expired at this time')
+      }
+    } catch (error) {
+      console.error('❌ Error in expireTicketsForEndedEvents:', error)
+      throw error
+    }
+  }
+
+  // ✅ THÊM: Helper method to expire tickets for a specific event
+  async expireTicketsForEvent (eventId) {
+    return new Promise((resolve, reject) => {
+      ticketServiceClient.ExpireTicketsForEvent(
+        { event_id: eventId },
+        { deadline: new Date(Date.now() + 30000) }, // 30 second timeout
+        (err, response) => {
+          if (err) {
+            reject(
+              new Error(
+                `Failed to expire tickets for event ${eventId}: ${err.message}`
+              )
+            )
+          } else {
+            resolve(response)
+          }
+        }
+      )
+    })
+  }
+
   // ✅ Manual trigger for testing
   async triggerUpdate () {
     console.log('🔧 Manual trigger: Updating ended events...')
     await this.updateEndedEvents()
+    console.log('🔧 Manual trigger: Expiring tickets for ended events...')
+    await this.expireTicketsForEndedEvents()
+  }
+
+  // ✅ THÊM: Manual trigger chỉ để expire tickets
+  async triggerExpireTickets () {
+    console.log('🔧 Manual trigger: Expiring tickets for ended events...')
+    await this.expireTicketsForEndedEvents()
   }
 }
 
